@@ -64,3 +64,43 @@ export async function authRateLimit(request: FastifyRequest, reply: FastifyReply
     });
   }
 }
+
+export async function posterRateLimit(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const ip = request.ip || '127.0.0.1';
+  const key = `rate_limit:poster:${ip}`;
+  const POSTER_LIMIT = 120; // 120/min per IP strict poster rate limit
+
+  try {
+    const redis = getRedisClient();
+    if (redis.status !== 'ready') {
+      await redis.connect().catch(() => {});
+    }
+
+    const result = (await redis.eval(
+      RATE_LIMIT_LUA,
+      1,
+      key,
+      WINDOW_SECONDS,
+    )) as [number, number];
+
+    const count = Number(result[0]);
+    let ttl = Number(result[1]);
+    if (ttl <= 0) {
+      ttl = WINDOW_SECONDS;
+    }
+
+    if (count > POSTER_LIMIT) {
+      reply.header('Retry-After', ttl);
+      return reply.status(429).send({
+        error: {
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many poster requests. Please try again later.',
+          requestId: request.id,
+        },
+      });
+    }
+  } catch (err: any) {
+    process.stderr.write(`[RateLimit Warning] Redis poster rate limit offline: ${err.message}\n`);
+  }
+}
+

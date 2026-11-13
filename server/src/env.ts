@@ -71,6 +71,7 @@ const envSchema = z.object({
   RATE_LIMIT_AUTH_IP: z.coerce.number().default(30),
 
   // Third Parties
+  TMDB_API_TOKEN: z.string().optional(),
   TMDB_ACCESS_TOKEN: z.string().optional(),
   FLUTTERWAVE_PUBLIC_KEY: z.string().optional(),
   FLUTTERWAVE_SECRET_KEY: z.string().optional(),
@@ -168,5 +169,8 @@ function validateEnv(sourceEnv: Record<string, string | undefined>): Env {
 }
 
 export const env = validateEnv(process.env);
+export function getTmdbToken(): string | undefined {
+  return env.TMDB_API_TOKEN || env.TMDB_ACCESS_TOKEN;
+}
 export { validateEnv };
 

@@ -8,6 +8,7 @@ import { SignUpScreen } from './src/screens/SignUpScreen';
 import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen';
 import { ComponentGalleryScreen } from './src/screens/ComponentGalleryScreen';
 import { MoviesHomeScreen } from './src/screens/MoviesHomeScreen';
+import { MovieDetailScreen } from './src/screens/MovieDetailScreen';
 import { authClient, AuthSession } from './src/api/authClient';
 
 type ScreenRoute =
@@ -16,11 +17,13 @@ type ScreenRoute =
   | 'sign_up'
   | 'reset_password'
   | 'gallery'
-  | 'movies';
+  | 'movies'
+  | 'movie_detail';
 
 const MainNavigator: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<ScreenRoute>('welcome');
   const [activeSession, setActiveSession] = useState<AuthSession | null>(null);
+  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
 
   const handleSignInSuccess = (session: AuthSession) => {
     setActiveSession(session);
@@ -78,7 +81,27 @@ const MainNavigator: React.FC = () => {
   }
 
   if (currentRoute === 'movies' && activeSession) {
-    return <MoviesHomeScreen onSignOut={handleSignOut} />;
+    return (
+      <MoviesHomeScreen
+        onSignOut={handleSignOut}
+        onSelectMovie={(id) => {
+          setSelectedMovieId(id);
+          setCurrentRoute('movie_detail');
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === 'movie_detail' && selectedMovieId !== null) {
+    return (
+      <MovieDetailScreen
+        movieId={selectedMovieId}
+        onBack={() => {
+          setSelectedMovieId(null);
+          setCurrentRoute('movies');
+        }}
+      />
+    );
   }
 
   return (

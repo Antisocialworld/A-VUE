@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "A VUE shared movie contract test fixtures for app and server",
+  "cases": {
+    "movieDto": [
+      {
+        "description": "Valid movie DTO with all required fields",
+        "input": {
+          "id": 101,
+          "title": "A VUE Cinema Experience",
+          "overview": "A gripping tale of cinema booking.",
+          "releaseDate": "2026-11-13",
+          "runtimeMinutes": 120,
+          "genres": ["Drama", "Thriller"],
+          "voteAverage": 8.5,
+          "posterPath": "/sample_poster_12345.jpg",
+          "backdropPath": "/sample_backdrop_12345.jpg"
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Valid movie DTO with null poster and backdrop and null runtime",
+        "input": {
+          "id": 102,
+          "title": "Minimal Movie",
+          "overview": "",
+          "releaseDate": "",
+          "runtimeMinutes": null,
+          "genres": [],
+          "voteAverage": 0,
+          "posterPath": null,
+          "backdropPath": null
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Invalid movie DTO: missing id",
+        "input": {
+          "title": "No ID Movie",
+          "overview": "Overview",
+          "releaseDate": "2026-01-01",
+          "runtimeMinutes": 90,
+          "genres": [],
+          "voteAverage": 5.0,
+          "posterPath": null,
+          "backdropPath": null
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid movie DTO: negative voteAverage",
+        "input": {
+          "id": 103,
+          "title": "Negative Rating",
+          "overview": "",
+          "releaseDate": "",
+          "runtimeMinutes": 90,
+          "genres": [],
+          "voteAverage": -1,
+          "posterPath": null,
+          "backdropPath": null
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid movie DTO: voteAverage exceeds 10",
+        "input": {
+          "id": 104,
+          "title": "Excessive Rating",
+          "overview": "",
+          "releaseDate": "",
+          "runtimeMinutes": 90,
+          "genres": [],
+          "voteAverage": 10.5,
+          "posterPath": null,
+          "backdropPath": null
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid movie DTO: unknown fields rejected (.strict())",
+        "input": {
+          "id": 105,
+          "title": "Strict Violation",
+          "overview": "Has extra field",
+          "releaseDate": "2026-01-01",
+          "runtimeMinutes": 90,
+          "genres": [],
+          "voteAverage": 7.0,
+          "posterPath": null,
+          "backdropPath": null,
+          "raw_tmdb_extra": "leak"
+        },
+        "expectedValid": false
+      }
+    ],
+    "moviesListQuery": [
+      {
+        "description": "Valid list query: page 1",
+        "input": { "page": "1" },
+        "expectedValid": true,
+        "expectedPage": 1
+      },
+      {
+        "description": "Valid list query: default page when omitted",
+        "input": {},
+        "expectedValid": true,
+        "expectedPage": 1
+      },
+      {
+        "description": "Valid list query: max page 5",
+        "input": { "page": "5" },
+        "expectedValid": true,
+        "expectedPage": 5
+      },
+      {
+        "description": "Invalid list query: page 0 (less than min 1)",
+        "input": { "page": "0" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid list query: page 6 (greater than max 5)",
+        "input": { "page": "6" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid list query: non-numeric string",
+        "input": { "page": "invalid" },
+        "expectedValid": false
+      }
+    ],
+    "movieDetailParams": [
+      {
+        "description": "Valid movie detail id: positive integer",
+        "input": { "id": "550" },
+        "expectedValid": true,
+        "expectedId": 550
+      },
+      {
+        "description": "Invalid movie detail id: zero",
+        "input": { "id": "0" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid movie detail id: negative integer",
+        "input": { "id": "-10" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid movie detail id: non-numeric string",
+        "input": { "id": "abc" },
+        "expectedValid": false
+      }
+    ],
+    "posterParams": [
+      {
+        "description": "Valid poster params: w342 with standard TMDB filename",
+        "input": {
+          "size": "w342",
+          "file": "9cqNxx0GxF0bflZmeSMuL5tnGzr.jpg"
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Valid poster params: w185 and w500 allowed",
+        "input": {
+          "size": "w185",
+          "file": "abcdef123456.jpg"
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Invalid poster params: disallowed size w200",
+        "input": {
+          "size": "w200",
+          "file": "9cqNxx0GxF0bflZmeSMuL5tnGzr.jpg"
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid poster params: disallowed size original",
+        "input": {
+          "size": "original",
+          "file": "9cqNxx0GxF0bflZmeSMuL5tnGzr.jpg"
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid poster params: SSRF path traversal attempt in file",
+        "input": {
+          "size": "w342",
+          "file": "../../../../etc/passwd"
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid poster params: non-jpg extension (.png)",
+        "input": {
+          "size": "w342",
+          "file": "9cqNxx0GxF0bflZmeSMuL5tnGzr.png"
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid poster params: file length too short (< 5 chars before .jpg)",
+        "input": {
+          "size": "w342",
+          "file": "a.jpg"
+        },
+        "expectedValid": false
+      }
+    ],
+    "moviesListResponse": [
+      {
+        "description": "Valid movies list response with stale: false",
+        "input": {
+          "movies": [],
+          "page": 1,
+          "totalPages": 5,
+          "totalResults": 100,
+          "stale": false
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Valid movies list response with fallback stale: true",
+        "input": {
+          "movies": [],
+          "page": 1,
+          "totalPages": 5,
+          "totalResults": 100,
+          "stale": true
+        },
+        "expectedValid": true
+      }
+    ]
+  }
+}
+

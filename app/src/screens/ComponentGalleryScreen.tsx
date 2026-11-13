@@ -266,6 +266,15 @@ export const ComponentGalleryScreen: React.FC<ComponentGalleryScreenProps> = ({ 
         onActionPress={() => {}}
       />
 
+      {renderStateLabel('EmptyState — With Watermark')}
+      <EmptyState
+        title="No Movies Scheduled"
+        message="There are currently no movies or showtimes available. Please check back soon."
+        actionTitle="Refresh"
+        onActionPress={() => {}}
+        showWatermark
+      />
+
       <Button
         title={STRINGS.gallery.backToAuth}
         onPress={onBack}

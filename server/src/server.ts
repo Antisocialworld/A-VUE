@@ -4,6 +4,7 @@ import { env } from './env.js';
 import { healthRoutes } from './routes/health.js';
 import { devRoutes } from './routes/dev.js';
 import { authRoutes } from './routes/auth.js';
+import { movieRoutes } from './routes/movies.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -64,6 +65,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(healthRoutes);
   await fastify.register(devRoutes);
   await fastify.register(authRoutes);
+  await fastify.register(movieRoutes);
 
   return fastify;
 }

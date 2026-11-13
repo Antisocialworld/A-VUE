@@ -123,6 +123,25 @@ export const STRINGS = {
     emptyStateMessage: 'There are currently no movies or showtimes available. Please check back soon.',
     signOutAction: 'Sign out',
     signOutAccessibilityHint: 'Signs out of your account and returns to the welcome screen',
+    loadMoreAction: 'Load more',
+    loadingMore: 'Loading more movies…',
+    tmdbAttribution:
+      'This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.',
+    posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
+    cardAccessibilityLabel: (title: string, year: string, rating: number) =>
+      `${title}, ${year}, rated ${rating} out of 10`,
+    ratingLabel: (rating: number) => `${rating.toFixed(1)}/10`,
+    noPoster: 'No poster available',
+  },
+
+  movieDetail: {
+    backAction: 'Back',
+    backAccessibilityLabel: 'Back to movies',
+    runtime: (minutes: number) => `${minutes} min`,
+    releaseDate: (date: string) => `Released ${date}`,
+    genresHeader: 'Genres',
+    overviewHeader: 'Overview',
+    noOverview: 'No overview available for this title.',
   },
 
   accessibility: {
