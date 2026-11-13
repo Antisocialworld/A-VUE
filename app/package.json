@@ -1,0 +1,31 @@
+{
+  "name": "avue-app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@expo-google-fonts/inter": "^0.2.3",
+    "@expo-google-fonts/red-hat-display": "^0.4.1",
+    "expo": "^58.0.0",
+    "expo-build-properties": "~58.0.12",
+    "expo-font": "~58.0.12",
+    "expo-secure-store": "~58.0.3",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "typescript": "~6.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "^1.6.0"
+  }
+}

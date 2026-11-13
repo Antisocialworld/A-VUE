@@ -1,0 +1,233 @@
+/**
+ * DESIGN SYSTEM CSS VARIABLES
+ * Auto-generated from design tokens by convertTokens.js (v3). Do not edit by hand.
+ * Dimensions in rem (1rem = 16px) except shadows (px) and pill radius (px).
+ */
+
+:root {
+  /* ---------------------------------------- */
+  /* Font Families                            */
+  /* ---------------------------------------- */
+  --font-family-primary: 'Red Hat Display', system-ui, sans-serif;
+  --font-family-secondary: 'Inter', system-ui, sans-serif;
+
+  /* ---------------------------------------- */
+  /* Typography                               */
+  /* ---------------------------------------- */
+  --font-display-large-fontsize: 3.875rem;
+  --font-display-large-textdecoration: none;
+  --font-display-large-fontfamily: var(--font-family-primary);
+  --font-display-large-fontweight: 600;
+  --font-display-large-fontstyle: normal;
+  --font-display-large-fontstretch: normal;
+  --font-display-large-letterspacing: -0.155rem;
+  --font-display-large-lineheight: 5.8125rem;
+  --font-display-large-paragraphindent: 0;
+  --font-display-large-paragraphspacing: 0;
+  --font-display-large-textcase: none;
+  --font-display-medium-fontsize: 3rem;
+  --font-display-medium-textdecoration: none;
+  --font-display-medium-fontfamily: var(--font-family-primary);
+  --font-display-medium-fontweight: 500;
+  --font-display-medium-fontstyle: normal;
+  --font-display-medium-fontstretch: normal;
+  --font-display-medium-letterspacing: -0.066rem;
+  --font-display-medium-lineheight: 4.5rem;
+  --font-display-medium-paragraphindent: 0;
+  --font-display-medium-paragraphspacing: 0;
+  --font-display-medium-textcase: none;
+  --font-display-small-fontsize: 2.5rem;
+  --font-display-small-textdecoration: none;
+  --font-display-small-fontfamily: var(--font-family-primary);
+  --font-display-small-fontweight: 500;
+  --font-display-small-fontstyle: normal;
+  --font-display-small-fontstretch: normal;
+  --font-display-small-letterspacing: -0.055rem;
+  --font-display-small-lineheight: 3.75rem;
+  --font-display-small-paragraphindent: 0;
+  --font-display-small-paragraphspacing: 0;
+  --font-display-small-textcase: none;
+  --font-headline-large-fontsize: 2rem;
+  --font-headline-large-textdecoration: none;
+  --font-headline-large-fontfamily: var(--font-family-primary);
+  --font-headline-large-fontweight: 500;
+  --font-headline-large-fontstyle: normal;
+  --font-headline-large-fontstretch: normal;
+  --font-headline-large-letterspacing: -0.0311875rem;
+  --font-headline-large-lineheight: 3rem;
+  --font-headline-large-paragraphindent: 0;
+  --font-headline-large-paragraphspacing: 0;
+  --font-headline-large-textcase: none;
+  --font-headline-medium-fontsize: 1.75rem;
+  --font-headline-medium-textdecoration: none;
+  --font-headline-medium-fontfamily: var(--font-family-primary);
+  --font-headline-medium-fontweight: 500;
+  --font-headline-medium-fontstyle: normal;
+  --font-headline-medium-fontstretch: normal;
+  --font-headline-medium-letterspacing: -0.02275rem;
+  --font-headline-medium-lineheight: 2.625rem;
+  --font-headline-medium-paragraphindent: 0;
+  --font-headline-medium-paragraphspacing: 0;
+  --font-headline-medium-textcase: none;
+  --font-headline-small-fontsize: 1.5rem;
+  --font-headline-small-textdecoration: none;
+  --font-headline-small-fontfamily: var(--font-family-primary);
+  --font-headline-small-fontweight: 500;
+  --font-headline-small-fontstyle: normal;
+  --font-headline-small-fontstretch: normal;
+  --font-headline-small-letterspacing: -0.015rem;
+  --font-headline-small-lineheight: 2.25rem;
+  --font-headline-small-paragraphindent: 0;
+  --font-headline-small-paragraphspacing: 0;
+  --font-headline-small-textcase: none;
+  --font-title-large-fontsize: 1.375rem;
+  --font-title-large-textdecoration: none;
+  --font-title-large-fontfamily: var(--font-family-primary);
+  --font-title-large-fontweight: 500;
+  --font-title-large-fontstyle: normal;
+  --font-title-large-fontstretch: normal;
+  --font-title-large-letterspacing: -0.01375rem;
+  --font-title-large-lineheight: 2.0625rem;
+  --font-title-large-paragraphindent: 0;
+  --font-title-large-paragraphspacing: 0;
+  --font-title-large-textcase: none;
+  --font-title-medium-fontsize: 1rem;
+  --font-title-medium-textdecoration: none;
+  --font-title-medium-fontfamily: var(--font-family-primary);
+  --font-title-medium-fontweight: 500;
+  --font-title-medium-fontstyle: normal;
+  --font-title-medium-fontstretch: normal;
+  --font-title-medium-letterspacing: -0.0085rem;
+  --font-title-medium-lineheight: 1.5rem;
+  --font-title-medium-paragraphindent: 0;
+  --font-title-medium-paragraphspacing: 0;
+  --font-title-medium-textcase: none;
+  --font-title-large-reduced-fontsize: 1.25rem;
+  --font-title-large-reduced-textdecoration: none;
+  --font-title-large-reduced-fontfamily: var(--font-family-primary);
+  --font-title-large-reduced-fontweight: 500;
+  --font-title-large-reduced-fontstyle: normal;
+  --font-title-large-reduced-fontstretch: normal;
+  --font-title-large-reduced-letterspacing: -0.0125rem;
+  --font-title-large-reduced-lineheight: 1.875rem;
+  --font-title-large-reduced-paragraphindent: 0;
+  --font-title-large-reduced-paragraphspacing: 0;
+  --font-title-large-reduced-textcase: none;
+  --font-title-medium-increased-fontsize: 1.125rem;
+  --font-title-medium-increased-textdecoration: none;
+  --font-title-medium-increased-fontfamily: var(--font-family-primary);
+  --font-title-medium-increased-fontweight: 500;
+  --font-title-medium-increased-fontstyle: normal;
+  --font-title-medium-increased-fontstretch: normal;
+  --font-title-medium-increased-letterspacing: -0.01125rem;
+  --font-title-medium-increased-lineheight: 1.6875rem;
+  --font-title-medium-increased-paragraphindent: 0;
+  --font-title-medium-increased-paragraphspacing: 0;
+  --font-title-medium-increased-textcase: none;
+  --font-title-small-fontsize: 0.875rem;
+  --font-title-small-textdecoration: none;
+  --font-title-small-fontfamily: var(--font-family-primary);
+  --font-title-small-fontweight: 600;
+  --font-title-small-fontstyle: normal;
+  --font-title-small-fontstretch: normal;
+  --font-title-small-letterspacing: -0.0065625rem;
+  --font-title-small-lineheight: 1.3125rem;
+  --font-title-small-paragraphindent: 0;
+  --font-title-small-paragraphspacing: 0;
+  --font-title-small-textcase: none;
+  --font-body-large-fontsize: 1rem;
+  --font-body-large-textdecoration: none;
+  --font-body-large-fontfamily: var(--font-family-secondary);
+  --font-body-large-fontweight: 500;
+  --font-body-large-fontstyle: normal;
+  --font-body-large-fontstretch: normal;
+  --font-body-large-letterspacing: -0.008rem;
+  --font-body-large-lineheight: 1.5rem;
+  --font-body-large-paragraphindent: 0;
+  --font-body-large-paragraphspacing: 0;
+  --font-body-large-textcase: none;
+  --font-body-medium-fontsize: 0.875rem;
+  --font-body-medium-textdecoration: none;
+  --font-body-medium-fontfamily: var(--font-family-secondary);
+  --font-body-medium-fontweight: 500;
+  --font-body-medium-fontstyle: normal;
+  --font-body-medium-fontstretch: normal;
+  --font-body-medium-letterspacing: -0.006125rem;
+  --font-body-medium-lineheight: 1.3125rem;
+  --font-body-medium-paragraphindent: 0;
+  --font-body-medium-paragraphspacing: 0;
+  --font-body-medium-textcase: none;
+  --font-body-small-fontsize: 0.75rem;
+  --font-body-small-textdecoration: none;
+  --font-body-small-fontfamily: var(--font-family-secondary);
+  --font-body-small-fontweight: 500;
+  --font-body-small-fontstyle: normal;
+  --font-body-small-fontstretch: normal;
+  --font-body-small-letterspacing: -0.00525rem;
+  --font-body-small-lineheight: 1.125rem;
+  --font-body-small-paragraphindent: 0;
+  --font-body-small-paragraphspacing: 0;
+  --font-body-small-textcase: none;
+  --font-label-large-fontsize: 0.875rem;
+  --font-label-large-textdecoration: none;
+  --font-label-large-fontfamily: var(--font-family-secondary);
+  --font-label-large-fontweight: 500;
+  --font-label-large-fontstyle: normal;
+  --font-label-large-fontstretch: normal;
+  --font-label-large-letterspacing: -0.007875rem;
+  --font-label-large-lineheight: 1.3125rem;
+  --font-label-large-paragraphindent: 0;
+  --font-label-large-paragraphspacing: 0;
+  --font-label-large-textcase: none;
+  --font-label-medium-fontsize: 0.75rem;
+  --font-label-medium-textdecoration: none;
+  --font-label-medium-fontfamily: var(--font-family-secondary);
+  --font-label-medium-fontweight: 500;
+  --font-label-medium-fontstyle: normal;
+  --font-label-medium-fontstretch: normal;
+  --font-label-medium-letterspacing: -0.00675rem;
+  --font-label-medium-lineheight: 1.125rem;
+  --font-label-medium-paragraphindent: 0;
+  --font-label-medium-paragraphspacing: 0;
+  --font-label-medium-textcase: none;
+  --font-label-small-fontsize: 0.6875rem;
+  --font-label-small-textdecoration: none;
+  --font-label-small-fontfamily: var(--font-family-secondary);
+  --font-label-small-fontweight: 500;
+  --font-label-small-fontstyle: normal;
+  --font-label-small-fontstretch: normal;
+  --font-label-small-letterspacing: -0.0055rem;
+  --font-label-small-lineheight: 1.03125rem;
+  --font-label-small-paragraphindent: 0;
+  --font-label-small-paragraphspacing: 0;
+  --font-label-small-textcase: none;
+
+  /* ---------------------------------------- */
+  /* Spacing                                  */
+  /* ---------------------------------------- */
+  --spacing-no-spacing: 0;
+  --spacing-extra-small-spacing: 0.25rem;
+  --spacing-small-spacing: 0.5rem;
+  --spacing-medium-spacing: 0.75rem;
+  --spacing-base-spacing: 1rem;
+  --spacing-large-spacing: 1.25rem;
+  --spacing-extra-large-spacing: 1.5rem;
+  --spacing-very-large-spacing: 2rem;
+
+  /* ---------------------------------------- */
+  /* Border Radius                            */
+  /* ---------------------------------------- */
+  --radius-none: 0;
+  --radius-small: 0.5rem;
+  --radius-medium: 0.75rem;
+  --radius-large: 1rem;
+  --radius-extra-large: 1.75rem;
+  --radius-full: 9999px;
+
+  /* ---------------------------------------- */
+  /* Effects & Shadows                        */
+  /* ---------------------------------------- */
+  --shadow-hard-shadow: 6px 5px 7px 0 #00286845;
+  --shadow-medium: 2px 4px 4px 0 #00286847;
+  --shadow-soft: 2px 2px 20px 0 #0028681f;
+}

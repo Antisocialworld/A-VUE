@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "A VUE shared authentication validation test contract for app and server",
+  "cases": {
+    "signIn": [
+      {
+        "description": "Valid sign-in credentials",
+        "input": { "email": "User@Avue.app", "password": "any-password-here" },
+        "expectedValid": true,
+        "normalizedEmail": "user@avue.app"
+      },
+      {
+        "description": "Invalid sign-in: invalid email format",
+        "input": { "email": "notanemail", "password": "Password123!" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-in: empty password",
+        "input": { "email": "user@avue.app", "password": "" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-in: unknown field rejected (.strict())",
+        "input": { "email": "user@avue.app", "password": "Password123!", "extra": "malicious" },
+        "expectedValid": false
+      }
+    ],
+    "signUp": [
+      {
+        "description": "Valid sign-up: meets all 4 password criteria",
+        "input": { "email": "NewUser@Avue.App", "password": "StrongPassword123!" },
+        "expectedValid": true,
+        "normalizedEmail": "newuser@avue.app"
+      },
+      {
+        "description": "Invalid sign-up: password missing uppercase",
+        "input": { "email": "user@avue.app", "password": "password123!" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-up: password missing lowercase",
+        "input": { "email": "user@avue.app", "password": "PASSWORD123!" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-up: password missing digit or symbol",
+        "input": { "email": "user@avue.app", "password": "PasswordOnlyLetters" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-up: password under 8 characters",
+        "input": { "email": "user@avue.app", "password": "Aa1!" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid sign-up: password over 128 characters",
+        "input": { "email": "user@avue.app", "password": "Aa1!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "expectedValid": false
+      }
+    ],
+    "verifyCode": [
+      {
+        "description": "Valid 6-digit verification code",
+        "input": { "email": "user@avue.app", "code": "123456" },
+        "expectedValid": true
+      },
+      {
+        "description": "Invalid code: 5 digits",
+        "input": { "email": "user@avue.app", "code": "12345" },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid code: contains letters",
+        "input": { "email": "user@avue.app", "code": "12345a" },
+        "expectedValid": false
+      }
+    ],
+    "resetPassword": [
+      {
+        "description": "Valid reset password submission",
+        "input": { "email": "user@avue.app", "code": "654321", "newPassword": "BrandNewPass99#" },
+        "expectedValid": true
+      },
+      {
+        "description": "Invalid reset password: weak new password",
+        "input": { "email": "user@avue.app", "code": "654321", "newPassword": "weak" },
+        "expectedValid": false
+      }
+    ]
+  }
+}
+
