@@ -9,8 +9,9 @@ import {
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
+import colorData from '../tokens/color-tokens-orange-green-yellow.json';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'text';
+export type ButtonVariant = 'primary' | 'secondary' | 'text' | 'outlined';
 
 export interface ButtonProps {
   title: string;
@@ -19,6 +20,8 @@ export interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   textColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
   accessibilityLabel?: string;
   accessibilityHint?: string;
   style?: StyleProp<ViewStyle>;
@@ -32,12 +35,14 @@ export const Button: React.FC<ButtonProps> = ({
   disabled = false,
   loading = false,
   textColor,
+  borderColor: customBorderColor,
+  borderWidth: customBorderWidth,
   accessibilityLabel,
   accessibilityHint,
   style,
   testID,
 }) => {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, radius, typography, mode } = useTheme();
   const [isPressed, setIsPressed] = useState(false);
 
   const getContainerStyle = () => {
@@ -49,13 +54,22 @@ export const Button: React.FC<ButtonProps> = ({
       backgroundColor = colors.primary;
     } else if (variant === 'secondary') {
       backgroundColor = colors.secondary;
+    } else if (variant === 'outlined') {
+      backgroundColor = 'transparent';
+      borderColor =
+        customBorderColor ||
+        (mode === 'dark' ? colorData.palettes.primary['80'] : colorData.palettes.primary['30']);
+      borderWidth = customBorderWidth !== undefined ? customBorderWidth : 3;
     } else if (variant === 'text') {
       backgroundColor = 'transparent';
     }
 
     if (disabled) {
-      if (variant === 'text') {
+      if (variant === 'text' || variant === 'outlined') {
         backgroundColor = 'transparent';
+        if (variant === 'outlined') {
+          borderColor = colors.outline;
+        }
       } else {
         backgroundColor = colors.surface_container_highest;
       }
@@ -64,6 +78,8 @@ export const Button: React.FC<ButtonProps> = ({
         backgroundColor = colors.primary_text_high;
       } else if (variant === 'secondary') {
         backgroundColor = colors.secondary_container;
+      } else if (variant === 'outlined') {
+        backgroundColor = 'transparent';
       }
     }
 
@@ -86,6 +102,9 @@ export const Button: React.FC<ButtonProps> = ({
     }
     if (variant === 'secondary') {
       return isPressed ? colors.on_secondary_container : colors.on_secondary;
+    }
+    if (variant === 'outlined') {
+      return mode === 'dark' ? colorData.palettes.primary['80'] : colors.on_surface;
     }
     return colors.primary_text;
   };

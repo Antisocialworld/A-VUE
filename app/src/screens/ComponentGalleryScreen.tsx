@@ -156,6 +156,13 @@ export const ComponentGalleryScreen: React.FC<ComponentGalleryScreenProps> = ({ 
       {renderStateLabel('Text Button — Disabled')}
       <Button title="Text Disabled" onPress={() => {}} variant="text" disabled />
 
+      {/* Outlined Button States */}
+      {renderStateLabel('Outlined Button — Default')}
+      <Button title="Outlined Default" onPress={() => {}} variant="outlined" />
+
+      {renderStateLabel('Outlined Button — Disabled')}
+      <Button title="Outlined Disabled" onPress={() => {}} variant="outlined" disabled />
+
       {/* ---------------- 3. TEXT FIELDS ---------------- */}
       {renderSectionHeader(STRINGS.gallery.textFieldsSection)}
 
