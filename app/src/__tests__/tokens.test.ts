@@ -71,4 +71,31 @@ describe('A VUE Design Tokens Audit', () => {
     expect(Radius.xl).toBe(28);
     expect(Radius.full).toBe(9999);
   });
+
+  it('verifies error tokens exist and meet WCAG AA contrast ratio >= 4.5:1 against surface background in light and dark modes (Task 2)', () => {
+    expect(LightColors.error).toBe('#BA1A1A');
+    expect(DarkColors.error).toBe('#FFB4AB');
+
+    function getRelativeLuminance(hex: string): number {
+      const rgb = hex.replace('#', '').match(/.{2}/g)!.map((c) => parseInt(c, 16) / 255);
+      const [r, g, b] = rgb.map((c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    function calculateContrastRatio(foreground: string, background: string): number {
+      const lumForeground = getRelativeLuminance(foreground);
+      const lumBackground = getRelativeLuminance(background);
+      const lighter = Math.max(lumForeground, lumBackground);
+      const darker = Math.min(lumForeground, lumBackground);
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    // Light mode: error text (#BA1A1A) on surface background (#FFF4F1)
+    const lightContrast = calculateContrastRatio(LightColors.error, LightColors.surface);
+    expect(lightContrast).toBeGreaterThanOrEqual(4.5);
+
+    // Dark mode: error text (#FFB4AB) on surface background (#1A110F)
+    const darkContrast = calculateContrastRatio(DarkColors.error, DarkColors.surface);
+    expect(darkContrast).toBeGreaterThanOrEqual(4.5);
+  });
 });

@@ -18,6 +18,7 @@ export interface ButtonProps {
   variant?: ButtonVariant;
   disabled?: boolean;
   loading?: boolean;
+  textColor?: string;
   accessibilityLabel?: string;
   accessibilityHint?: string;
   style?: StyleProp<ViewStyle>;
@@ -30,6 +31,7 @@ export const Button: React.FC<ButtonProps> = ({
   variant = 'primary',
   disabled = false,
   loading = false,
+  textColor,
   accessibilityLabel,
   accessibilityHint,
   style,
@@ -75,6 +77,9 @@ export const Button: React.FC<ButtonProps> = ({
   const getTextColor = () => {
     if (disabled) {
       return colors.outline;
+    }
+    if (textColor) {
+      return textColor;
     }
     if (variant === 'primary') {
       return colors.on_primary;
