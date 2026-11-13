@@ -104,3 +104,108 @@ export async function posterRateLimit(request: FastifyRequest, reply: FastifyRep
   }
 }
 
+/**
+ * Checks dual rate limits (per user AND per IP).
+ * Fails closed with 503 if Redis is unavailable.
+ */
+async function checkDualRateLimit(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options: {
+    category: string;
+    userId?: string;
+    userLimit: number;
+    ipLimit: number;
+    actionDescription: string;
+  }
+): Promise<boolean> {
+  const ip = request.ip || '127.0.0.1';
+  const redis = getRedisClient();
+
+  try {
+    if (redis.status !== 'ready') {
+      await redis.connect().catch(() => {});
+    }
+
+    // 1. Check IP limit
+    const ipKey = `rate_limit:${options.category}:ip:${ip}`;
+    const ipRes = (await redis.eval(RATE_LIMIT_LUA, 1, ipKey, WINDOW_SECONDS)) as [number, number];
+    const ipCount = Number(ipRes[0]);
+    const ipTtl = Number(ipRes[1]) > 0 ? Number(ipRes[1]) : WINDOW_SECONDS;
+
+    if (ipCount > options.ipLimit) {
+      reply.header('Retry-After', ipTtl);
+      reply.status(429).send({
+        error: {
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: `Too many ${options.actionDescription} requests from this IP. Please try again later.`,
+          requestId: request.id,
+        },
+      });
+      return false;
+    }
+
+    // 2. Check User limit (if authenticated)
+    if (options.userId) {
+      const userKey = `rate_limit:${options.category}:user:${options.userId}`;
+      const userRes = (await redis.eval(RATE_LIMIT_LUA, 1, userKey, WINDOW_SECONDS)) as [number, number];
+      const userCount = Number(userRes[0]);
+      const userTtl = Number(userRes[1]) > 0 ? Number(userRes[1]) : WINDOW_SECONDS;
+
+      if (userCount > options.userLimit) {
+        reply.header('Retry-After', userTtl);
+        reply.status(429).send({
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: `Too many ${options.actionDescription} requests for your account. Please try again later.`,
+            requestId: request.id,
+          },
+        });
+        return false;
+      }
+    }
+
+    return true;
+  } catch (err: any) {
+    process.stderr.write(`[RateLimit Error] Redis rate limit offline for ${options.category}: ${err.message}\n`);
+    reply.status(503).send({
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: `${options.actionDescription} service temporarily unavailable. Please retry.`,
+        requestId: request.id,
+      },
+    });
+    return false;
+  }
+}
+
+export async function holdRateLimit(request: FastifyRequest, reply: FastifyReply, userId?: string): Promise<boolean> {
+  return checkDualRateLimit(request, reply, {
+    category: 'hold',
+    userId,
+    userLimit: env.RATE_LIMIT_HOLD_USER,
+    ipLimit: env.RATE_LIMIT_HOLD_IP,
+    actionDescription: 'seat hold',
+  });
+}
+
+export async function checkoutRateLimit(request: FastifyRequest, reply: FastifyReply, userId?: string): Promise<boolean> {
+  return checkDualRateLimit(request, reply, {
+    category: 'checkout',
+    userId,
+    userLimit: env.RATE_LIMIT_CHECKOUT_USER,
+    ipLimit: env.RATE_LIMIT_CHECKOUT_IP,
+    actionDescription: 'checkout',
+  });
+}
+
+export async function searchRateLimit(request: FastifyRequest, reply: FastifyReply, userId?: string): Promise<boolean> {
+  return checkDualRateLimit(request, reply, {
+    category: 'search',
+    userId,
+    userLimit: env.RATE_LIMIT_SEARCH_USER,
+    ipLimit: env.RATE_LIMIT_SEARCH_IP,
+    actionDescription: 'search',
+  });
+}
+

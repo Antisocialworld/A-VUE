@@ -121,6 +121,15 @@ describe('Task C: Progressive Posters & List Performance', () => {
     const posterLabel = STRINGS.movies.posterAccessibilityLabel('Inception');
     expect(posterLabel).toBe('Poster for Inception');
   });
+
+  it('MovieCard enforces equal card heights across grid rows by reserving 2 title lines and flex alignment (Task 7)', () => {
+    // Title reserves 2 lines of height via typography tokens (minHeight = lineHeight * 2)
+    expect(cardSource).toContain('minHeight: typography.titleSmall.lineHeight * 2');
+    expect(cardSource).toContain('cardContainer: {');
+    expect(cardSource).toContain('flex: 1');
+    expect(cardSource).toContain('infoContainer: {');
+    expect(cardSource).toContain("justifyContent: 'space-between'");
+  });
 });
 
 describe('MoviesHomeScreen & MovieDetailScreen TMDB Attribution (Task B)', () => {

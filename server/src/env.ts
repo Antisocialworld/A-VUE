@@ -54,12 +54,15 @@ const envSchema = z.object({
   // Traffic Constants
   HOLD_TTL_SECONDS: z.coerce.number().default(600),
   MAX_SEATS_PER_HOLD: z.coerce.number().default(6),
-  WAITING_ROOM_ACTIVE_LIMIT: z.coerce.number().default(300),
-  WAITING_ROOM_ADMIT_PER_SEC: z.coerce.number().default(10),
+  WAITING_ROOM_ACTIVE_LIMIT: z.coerce.number().default(100),
+  WAITING_ROOM_ADMIT_PER_SEC: z.coerce.number().default(5),
+  WAITING_ROOM_ADMIT_PER_SECOND: z.coerce.number().optional(),
   WAITING_ROOM_SLOT_SECONDS: z.coerce.number().default(90),
-  SEAT_MAP_CACHE_SECONDS: z.coerce.number().default(1),
+  SEAT_MAP_CACHE_SECONDS: z.coerce.number().default(2),
   READ_YOUR_WRITES_PIN_SECONDS: z.coerce.number().default(10),
   IDEMPOTENCY_TTL_HOURS: z.coerce.number().default(24),
+  SERVICE_FEE_BPS: z.coerce.number().default(500),
+  CRON_SECRET: z.string().optional(),
 
   // Rate Limits
   RATE_LIMIT_HOLD_USER: z.coerce.number().default(10),
@@ -91,6 +94,9 @@ const envSchema = z.object({
 
   // Observability
   ERROR_TRACKING_DSN: z.string().optional(),
+
+  // Authorization (Task 5)
+  ADMIN_EMAILS: z.string().optional().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -107,8 +113,23 @@ export function validateSmtpEnv(config: {
   const hasUser = Boolean(user && user.length > 0);
   const hasPass = Boolean(pass && pass.length > 0);
 
+  const host = config.SMTP_HOST.trim().toLowerCase();
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1';
+
+  // Never Gmail SMTP (Rule 02 / Privacy)
+  if (host.includes('gmail.com') || host.includes('googlemail.com')) {
+    throw new Error(
+      '[FATAL] Invalid SMTP configuration: Gmail SMTP is strictly forbidden (Rule 02 / Privacy).',
+    );
+  }
+
   // Real relay mode: both SMTP_USER and SMTP_PASS are set
   if (hasUser && hasPass) {
+    if (isLocalHost && config.NODE_ENV === 'production') {
+      throw new Error(
+        '[FATAL] Invalid SMTP configuration: Localhost SMTP is forbidden in production. Configure a real remote relay.',
+      );
+    }
     return {
       mode: 'relay',
       auth: { user: user!, pass: pass! },
@@ -130,8 +151,6 @@ export function validateSmtpEnv(config: {
   }
 
   // Invalid: neither is set, but SMTP_HOST is not localhost or 127.0.0.1
-  const host = config.SMTP_HOST.trim().toLowerCase();
-  const isLocalHost = host === 'localhost' || host === '127.0.0.1';
   if (!isLocalHost) {
     throw new Error(
       '[FATAL] Invalid SMTP configuration: Unauthenticated SMTP is only allowed when SMTP_HOST is localhost or 127.0.0.1. Set SMTP_USER and SMTP_PASS for remote SMTP_HOST.',
@@ -171,6 +190,18 @@ function validateEnv(sourceEnv: Record<string, string | undefined>): Env {
 export const env = validateEnv(process.env);
 export function getTmdbToken(): string | undefined {
   return env.TMDB_API_TOKEN || env.TMDB_ACCESS_TOKEN;
+}
+export function getAdminEmails(): string[] {
+  const raw = env.ADMIN_EMAILS || process.env.ADMIN_EMAILS || '';
+  return raw
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+}
+export function isAdmin(email?: string): boolean {
+  if (!email) return false;
+  const admins = getAdminEmails();
+  return admins.includes(email.trim().toLowerCase());
 }
 export { validateEnv };
 

@@ -150,6 +150,7 @@ const MovieCardInner: React.FC<MovieCardProps> = ({
               fontSize: typography.titleSmall.fontSize,
               fontWeight: typography.titleSmall.fontWeight,
               lineHeight: typography.titleSmall.lineHeight,
+              minHeight: typography.titleSmall.lineHeight * 2,
             },
           ]}
         >
@@ -197,6 +198,7 @@ export const MovieCard = React.memo(MovieCardInner);
 
 const styles = StyleSheet.create({
   cardContainer: {
+    flex: 1,
     minHeight: 44, // Minimum 44 pt touch target
     width: '100%',
     overflow: 'hidden',
@@ -224,6 +226,8 @@ const styles = StyleSheet.create({
   },
   infoContainer: {
     width: '100%',
+    flex: 1,
+    justifyContent: 'space-between',
   },
   title: {
     letterSpacing: -0.1,

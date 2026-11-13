@@ -11,6 +11,9 @@ node_modules/
 .env.*.local
 server/.env
 app/.env
+.loadtest-tokens.json
+server/.loadtest-tokens.json
+load-tests/tokens.json
 
 # Local-only agent & requirement files (Rule 07)
 AGENTS.md

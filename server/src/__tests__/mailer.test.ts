@@ -289,4 +289,56 @@ describe('SMTP Mailer Module (Rule 02 / Task 1 & 2)', () => {
       stderrSpy.mockRestore();
     });
   });
+
+  describe('Task 1: Production Relay & Gmail SMTP Rejection (Rule 02 / Privacy)', () => {
+    it('strictly forbids Gmail SMTP in any environment', () => {
+      expect(() => {
+        validateSmtpEnv({
+          SMTP_HOST: 'smtp.gmail.com',
+          SMTP_PORT: 587,
+          SMTP_USER: 'test@gmail.com',
+          SMTP_PASS: 'secret',
+          NODE_ENV: 'development',
+        });
+      }).toThrow(/Gmail SMTP is strictly forbidden/);
+
+      expect(() => {
+        validateSmtpEnv({
+          SMTP_HOST: 'smtp.googlemail.com',
+          SMTP_PORT: 465,
+          SMTP_USER: 'test@googlemail.com',
+          SMTP_PASS: 'secret',
+          NODE_ENV: 'production',
+        });
+      }).toThrow(/Gmail SMTP is strictly forbidden/);
+    });
+
+    it('forbids localhost SMTP in production', () => {
+      expect(() => {
+        validateSmtpEnv({
+          SMTP_HOST: 'localhost',
+          SMTP_PORT: 1025,
+          SMTP_USER: 'user',
+          SMTP_PASS: 'pass',
+          NODE_ENV: 'production',
+        });
+      }).toThrow(/Localhost SMTP is forbidden in production/);
+    });
+
+    it('accepts configured production relay with remote host and credentials', () => {
+      const result = validateSmtpEnv({
+        SMTP_HOST: 'smtp-relay.brevo.com',
+        SMTP_PORT: 587,
+        SMTP_USER: 'relay-user',
+        SMTP_PASS: 'relay-pass',
+        NODE_ENV: 'production',
+      });
+
+      expect(result.mode).toBe('relay');
+      expect(result.auth).toEqual({
+        user: 'relay-user',
+        pass: 'relay-pass',
+      });
+    });
+  });
 });

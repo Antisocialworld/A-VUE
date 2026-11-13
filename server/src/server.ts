@@ -5,6 +5,11 @@ import { healthRoutes } from './routes/health.js';
 import { devRoutes } from './routes/dev.js';
 import { authRoutes } from './routes/auth.js';
 import { movieRoutes } from './routes/movies.js';
+import { showtimeRoutes } from './routes/showtimes.js';
+import { checkoutRoutes } from './routes/checkout.js';
+import { webhookRoutes } from './routes/webhooks.js';
+import { ticketRoutes } from './routes/tickets.js';
+import { cronRoutes } from './routes/cron.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -27,6 +32,21 @@ export async function buildServer(): Promise<FastifyInstance> {
     connectionTimeout: env.REQUEST_TIMEOUT_MS, // 10 s limit from AGENTS.md
     trustProxy: env.TRUST_PROXY,
   });
+
+  // Preserve raw request body for Flutterwave webhook signature verification (Rule 02)
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req: any, body: Buffer, done: (err: Error | null, result?: any) => void) => {
+      try {
+        req.rawBody = body;
+        const json = body.length > 0 ? JSON.parse(body.toString('utf-8')) : {};
+        done(null, json);
+      } catch (err: any) {
+        done(err);
+      }
+    }
+  );
 
   // Security Headers Hook (Rule 02: nosniff, frame deny, HSTS. No CORS)
   fastify.addHook('onSend', async (_request, reply, payload) => {
@@ -66,6 +86,11 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(devRoutes);
   await fastify.register(authRoutes);
   await fastify.register(movieRoutes);
+  await fastify.register(showtimeRoutes);
+  await fastify.register(checkoutRoutes);
+  await fastify.register(webhookRoutes);
+  await fastify.register(ticketRoutes);
+  await fastify.register(cronRoutes);
 
   return fastify;
 }

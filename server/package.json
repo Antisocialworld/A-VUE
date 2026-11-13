@@ -12,7 +12,9 @@
     "mail:test": "tsx scripts/send-test-mail.ts",
     "smoke:ratelimit": "tsx scripts/smoke-ratelimit.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --include \"src/__tests__/**/*.integration.test.ts\"",
+    "seed:loadtest-sessions": "tsx scripts/loadtest-sessions.ts"
   },
   "dependencies": {
     "argon2": "^0.40.3",
