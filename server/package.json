@@ -1,0 +1,35 @@
+{
+  "name": "avue-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A VUE Backend API (Fastify, PostgreSQL, Redis)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "mail:test": "tsx scripts/send-test-mail.ts",
+    "smoke:ratelimit": "tsx scripts/smoke-ratelimit.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "argon2": "^0.40.3",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.4.1",
+    "nodemailer": "^6.9.14",
+    "pg": "^8.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/nodemailer": "^6.4.15",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}
+
