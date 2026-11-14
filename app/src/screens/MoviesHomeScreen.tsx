@@ -21,9 +21,25 @@ import { STRINGS } from '../constants/strings';
 import { MovieDto } from '../schemas/movies';
 import { moviesClient } from '../api/moviesClient';
 
+export interface MovieSelectParams {
+  movieId: number;
+  movieTitle: string;
+  posterUrl?: string;
+  releaseYear?: string;
+  voteAverage?: number;
+}
+
+export type MovieSelectHandler = (
+  paramsOrId: MovieSelectParams | number,
+  movieTitle?: string,
+  posterUrl?: string,
+  releaseYear?: string,
+  voteAverage?: number,
+) => void;
+
 export interface MoviesHomeScreenProps {
   onSignOut: () => void;
-  onSelectMovie: (movieId: number) => void;
+  onSelectMovie: MovieSelectHandler;
   onNavigateToTickets?: () => void;
 }
 
@@ -155,10 +171,35 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   };
 
   const handleSelectMovie = useCallback(
-    (movieId: number) => {
-      onSelectMovie(movieId);
+    (movieOrId: MovieDto | number) => {
+      const movie =
+        typeof movieOrId === 'number'
+          ? movies.find((m) => m.id === movieOrId)
+          : movieOrId;
+
+      if (movie) {
+        const releaseYear = movie.releaseDate
+          ? movie.releaseDate.split('-')[0]
+          : STRINGS.movies.tba;
+        const posterUrl = movie.posterPath
+          ? (moviesClient.getPosterUrl('w342', movie.posterPath) ?? undefined)
+          : undefined;
+
+        onSelectMovie({
+          movieId: movie.id,
+          movieTitle: movie.title,
+          posterUrl,
+          releaseYear,
+          voteAverage: movie.voteAverage,
+        });
+      } else if (typeof movieOrId === 'number') {
+        onSelectMovie({
+          movieId: movieOrId,
+          movieTitle: '',
+        });
+      }
     },
-    [onSelectMovie],
+    [movies, onSelectMovie],
   );
 
   const keyExtractor = useCallback((item: MovieDto) => String(item.id), []);
@@ -166,7 +207,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   const renderItem = useCallback(
     ({ item }: { item: MovieDto }) => (
       <View style={styles.cardWrapper}>
-        <MovieCard movie={item} onPress={handleSelectMovie} />
+        <MovieCard movie={item} onPress={() => handleSelectMovie(item)} />
       </View>
     ),
     [handleSelectMovie],

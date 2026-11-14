@@ -39,6 +39,9 @@ const MainNavigator: React.FC = () => {
   const [activeSession, setActiveSession] = useState<AuthSession | null>(null);
   const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
   const [selectedMovieTitle, setSelectedMovieTitle] = useState<string>('');
+  const [selectedMoviePosterUrl, setSelectedMoviePosterUrl] = useState<string | undefined>(undefined);
+  const [selectedMovieReleaseYear, setSelectedMovieReleaseYear] = useState<string | undefined>(undefined);
+  const [selectedMovieVoteAverage, setSelectedMovieVoteAverage] = useState<number | undefined>(undefined);
   const [selectedShowtime, setSelectedShowtime] = useState<ShowtimeItem | null>(null);
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
   const [selectedSeats, setSelectedSeats] = useState<SeatMapItem[]>([]);
@@ -104,8 +107,20 @@ const MainNavigator: React.FC = () => {
     return (
       <MoviesHomeScreen
         onSignOut={handleSignOut}
-        onSelectMovie={(id) => {
-          setSelectedMovieId(id);
+        onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
+          if (typeof movieOrId === 'object' && movieOrId !== null) {
+            setSelectedMovieId(movieOrId.movieId);
+            setSelectedMovieTitle(movieOrId.movieTitle || '');
+            setSelectedMoviePosterUrl(movieOrId.posterUrl);
+            setSelectedMovieReleaseYear(movieOrId.releaseYear);
+            setSelectedMovieVoteAverage(movieOrId.voteAverage);
+          } else {
+            setSelectedMovieId(movieOrId);
+            if (movieTitle) setSelectedMovieTitle(movieTitle);
+            setSelectedMoviePosterUrl(posterUrl);
+            setSelectedMovieReleaseYear(releaseYear);
+            setSelectedMovieVoteAverage(voteAverage);
+          }
           setCurrentRoute('movie_detail');
         }}
         onNavigateToTickets={() => setCurrentRoute('my_tickets')}
@@ -119,6 +134,10 @@ const MainNavigator: React.FC = () => {
         movieId={selectedMovieId}
         onBack={() => {
           setSelectedMovieId(null);
+          setSelectedMovieTitle('');
+          setSelectedMoviePosterUrl(undefined);
+          setSelectedMovieReleaseYear(undefined);
+          setSelectedMovieVoteAverage(undefined);
           setCurrentRoute('movies');
         }}
         onGetTickets={(id, title) => {
@@ -135,6 +154,9 @@ const MainNavigator: React.FC = () => {
       <ShowtimesScreen
         movieId={selectedMovieId}
         movieTitle={selectedMovieTitle || 'Showtimes'}
+        posterUrl={selectedMoviePosterUrl}
+        releaseYear={selectedMovieReleaseYear}
+        voteAverage={selectedMovieVoteAverage}
         onBack={() => setCurrentRoute('movie_detail')}
         onSelectShowtime={(st) => {
           setSelectedShowtime(st);

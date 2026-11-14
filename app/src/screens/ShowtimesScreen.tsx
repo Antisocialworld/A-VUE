@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +19,9 @@ export interface ShowtimesScreenProps {
   movieTitle: string;
   onBack: () => void;
   onSelectShowtime: (showtime: ShowtimeItem) => void;
+  posterUrl?: string;
+  releaseYear?: string;
+  voteAverage?: number;
 }
 
 interface DateOption {
@@ -31,12 +35,19 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
   movieTitle,
   onBack,
   onSelectShowtime,
+  posterUrl,
+  releaseYear,
+  voteAverage,
 }) => {
   const { colors, spacing, typography, radius } = useTheme();
 
+  const [imageError, setImageError] = useState<boolean>(false);
   const [showtimes, setShowtimes] = useState<ShowtimeItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const hasPoster = Boolean(posterUrl && !imageError);
+  const hasMeta = Boolean(releaseYear || typeof voteAverage === 'number');
 
   // 7-day date strip options
   const dateOptions: DateOption[] = useMemo(() => {
@@ -134,33 +145,148 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
       scrollable={false}
       contentContainerStyle={[styles.container, { padding: 0 }]}
     >
-      {/* Movie Mini Header */}
+      {/* Movie Header Container */}
       <View
         style={[
-          styles.miniHeader,
+          styles.movieHeaderContainer,
           {
             backgroundColor: colors.surface_container_low,
-            borderBottomColor: colors.outline_variant,
-            paddingHorizontal: spacing.base,
-            paddingVertical: spacing.md,
+            borderRadius: radius.md,
+            padding: spacing.sm,
+            marginHorizontal: spacing.base,
+            marginVertical: spacing.sm,
           },
         ]}
       >
-        <Text
-          allowFontScaling
-          numberOfLines={1}
-          style={[
-            styles.movieTitleText,
-            {
-              color: colors.on_surface,
-              fontFamily: typography.titleMedium.fontFamily,
-              fontSize: typography.titleMedium.fontSize,
-              fontWeight: typography.titleMedium.fontWeight,
-            },
-          ]}
-        >
-          {movieTitle}
-        </Text>
+        {hasPoster ? (
+          <>
+            <Image
+              source={{ uri: posterUrl }}
+              accessibilityRole="image"
+              accessibilityLabel={STRINGS.showtimes.posterAccessibilityLabel(movieTitle)}
+              onError={() => setImageError(true)}
+              style={[
+                styles.headerPoster,
+                {
+                  borderRadius: radius.sm,
+                },
+              ]}
+            />
+            <View style={[styles.headerTextContainer, { marginLeft: spacing.md }]}>
+              <Text
+                allowFontScaling
+                numberOfLines={2}
+                ellipsizeMode="tail"
+                style={[
+                  styles.movieTitleText,
+                  {
+                    color: colors.on_surface,
+                    fontFamily: typography.titleMedium.fontFamily,
+                    fontSize: typography.titleMedium.fontSize,
+                    fontWeight: typography.titleMedium.fontWeight,
+                    lineHeight: typography.titleMedium.lineHeight,
+                  },
+                ]}
+              >
+                {movieTitle}
+              </Text>
+              {hasMeta && (
+                <View style={[styles.metaRow, { marginTop: spacing.xs, gap: spacing.sm }]}>
+                  {releaseYear && (
+                    <Text
+                      allowFontScaling
+                      style={[
+                        styles.yearText,
+                        {
+                          color: colors.on_surface_variant,
+                          fontFamily: typography.bodySmall.fontFamily,
+                          fontSize: typography.bodySmall.fontSize,
+                          lineHeight: typography.bodySmall.lineHeight,
+                        },
+                      ]}
+                    >
+                      {releaseYear}
+                    </Text>
+                  )}
+                  {typeof voteAverage === 'number' && (
+                    <Text
+                      allowFontScaling
+                      style={[
+                        styles.ratingText,
+                        {
+                          color: colors.primary,
+                          fontFamily: typography.labelSmall.fontFamily,
+                          fontSize: typography.labelSmall.fontSize,
+                          fontWeight: '700',
+                          lineHeight: typography.labelSmall.lineHeight,
+                        },
+                      ]}
+                    >
+                      ★ {voteAverage.toFixed(1)}
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+          </>
+        ) : (
+          <View style={styles.headerTextContainer}>
+            <Text
+              allowFontScaling
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              style={[
+                styles.movieTitleText,
+                {
+                  color: colors.on_surface,
+                  fontFamily: typography.titleMedium.fontFamily,
+                  fontSize: typography.titleMedium.fontSize,
+                  fontWeight: typography.titleMedium.fontWeight,
+                  lineHeight: typography.titleMedium.lineHeight,
+                },
+              ]}
+            >
+              {movieTitle}
+            </Text>
+            {hasMeta && (
+              <View style={[styles.metaRow, { marginTop: spacing.xs, gap: spacing.sm }]}>
+                {releaseYear && (
+                  <Text
+                    allowFontScaling
+                    style={[
+                      styles.yearText,
+                      {
+                        color: colors.on_surface_variant,
+                        fontFamily: typography.bodySmall.fontFamily,
+                        fontSize: typography.bodySmall.fontSize,
+                        lineHeight: typography.bodySmall.lineHeight,
+                      },
+                    ]}
+                  >
+                    {releaseYear}
+                  </Text>
+                )}
+                {typeof voteAverage === 'number' && (
+                  <Text
+                    allowFontScaling
+                    style={[
+                      styles.ratingText,
+                      {
+                        color: colors.primary,
+                        fontFamily: typography.labelSmall.fontFamily,
+                        fontSize: typography.labelSmall.fontSize,
+                        fontWeight: '700',
+                        lineHeight: typography.labelSmall.lineHeight,
+                      },
+                    ]}
+                  >
+                    ★ {voteAverage.toFixed(1)}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* 7-Day Date Strip */}
@@ -399,13 +525,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  miniHeader: {
-    width: '100%',
-    borderBottomWidth: 1,
+  movieHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  headerPoster: {
+    width: 56,
+    aspectRatio: 2 / 3,
+  },
+  headerTextContainer: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   movieTitleText: {
+    textAlign: 'left',
     letterSpacing: -0.1,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  yearText: {},
+  ratingText: {},
   dateStripWrapper: {
     width: '100%',
     borderBottomWidth: 1,

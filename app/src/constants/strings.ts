@@ -132,6 +132,7 @@ export const STRINGS = {
       `${title}, ${year}, rated ${rating} out of 10`,
     ratingLabel: (rating: number) => `${rating.toFixed(1)}/10`,
     noPoster: 'No poster available',
+    tba: 'TBA',
   },
 
   movieDetail: {
@@ -147,6 +148,7 @@ export const STRINGS = {
 
   showtimes: {
     header: 'Showtimes',
+    posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
     dateToday: 'Today',
     dateTomorrow: 'Tomorrow',
     noShowtimesDayTitle: 'No Showtimes Available',
