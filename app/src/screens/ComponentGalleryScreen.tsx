@@ -7,8 +7,11 @@ import {
   FormError,
   Logo,
   PasswordField,
+  QrCodeView,
   ScreenShell,
+  SeatMap,
   TextField,
+  TicketIcon,
 } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
@@ -274,6 +277,33 @@ export const ComponentGalleryScreen: React.FC<ComponentGalleryScreenProps> = ({ 
         onActionPress={() => {}}
         showWatermark
       />
+
+      {renderSectionHeader('Seat Map & QR Components')}
+      {renderStateLabel('Interactive Seat Map')}
+      <View style={{ height: 260, borderWidth: 1, borderColor: colors.outline_variant, borderRadius: radius.md, overflow: 'hidden' }}>
+        <SeatMap
+          showtimeId="gallery-demo-showtime"
+          selectedSeatIds={[]}
+          onSelectionChange={() => {}}
+          onToast={() => {}}
+        />
+      </View>
+
+      {renderStateLabel('Deterministic Pure-JS Ticket QR Code')}
+      <View style={[styles.centerItem, { padding: spacing.md }]}>
+        <QrCodeView value="avue_gallery_qr_sample_reference_token_128_bit" size={160} />
+      </View>
+
+      {renderSectionHeader('Vector Icons')}
+      {renderStateLabel('TicketIcon: Primary On-Primary (Header / My Tickets Pill) & Outlined Muted')}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.sm }}>
+        <View style={{ backgroundColor: colors.primary, padding: spacing.sm, borderRadius: radius.full }}>
+          <TicketIcon size={20} color={colors.on_primary} />
+        </View>
+        <View style={{ borderWidth: 1, borderColor: colors.outline_variant, padding: spacing.sm, borderRadius: radius.full }}>
+          <TicketIcon size={20} color={colors.on_surface_variant} />
+        </View>
+      </View>
 
       <Button
         title={STRINGS.gallery.backToAuth}

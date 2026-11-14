@@ -137,11 +137,91 @@ export const STRINGS = {
   movieDetail: {
     backAction: 'Back',
     backAccessibilityLabel: 'Back to movies',
+    getTicketsAction: 'Get tickets',
     runtime: (minutes: number) => `${minutes} min`,
     releaseDate: (date: string) => `Released ${date}`,
     genresHeader: 'Genres',
     overviewHeader: 'Overview',
     noOverview: 'No overview available for this title.',
+  },
+
+  showtimes: {
+    header: 'Showtimes',
+    dateToday: 'Today',
+    dateTomorrow: 'Tomorrow',
+    noShowtimesDayTitle: 'No Showtimes Available',
+    noShowtimesDayMessage: 'There are no showtimes scheduled for this date. Please select another date.',
+    soldOut: 'Sold out',
+    fewLeft: 'Few left',
+    seatsLeft: (count: number) => `${count} left`,
+    selectSeatsAction: 'Select seats',
+  },
+
+  seatMap: {
+    title: 'Select Seats',
+    screenIndicator: 'SCREEN',
+    availableLegend: 'Available',
+    selectedLegend: 'Selected',
+    heldLegend: 'Held',
+    soldLegend: 'Sold',
+    wheelchairLegend: 'Wheelchair',
+    maxSeatsReached: 'You can select up to 6 seats per booking.',
+    seatDeselectedToast: (seatLabel: string) => `${seatLabel} is no longer available and was deselected.`,
+    conflictToast: 'One or more selected seats were taken by another user.',
+    serviceUnavailableToast: 'Seat hold service temporarily unavailable. Please retry.',
+    proceedToCheckout: 'Proceed to checkout',
+    selectedCount: (count: number) => `${count} seat${count === 1 ? '' : 's'} selected`,
+    seatAccessibilityLabel: (row: string, num: number, state: string, accessible: boolean) =>
+      `Row ${row}, seat ${num}, ${accessible ? 'wheelchair accessible, ' : ''}${state}`,
+  },
+
+  waitingRoom: {
+    title: 'Waiting Room',
+    subtitle: 'High demand for this showtime. You have been placed in the waiting room.',
+    rankLabel: 'Your position in line',
+    estimatedWaitLabel: 'Estimated wait time',
+    admittedMessage: 'You are admitted! Securing your seats now…',
+    secondsRemaining: (s: number) => `~${s} seconds`,
+  },
+
+  checkout: {
+    title: 'Checkout',
+    testModeBadge: 'TEST MODE',
+    priceBreakdownHeader: 'Order Summary',
+    ticketsLine: (count: number) => `Tickets (${count}x)`,
+    serviceFeeLine: 'Service Fee',
+    totalLine: 'Total Amount',
+    holdCountdown: (minutes: number, seconds: number) =>
+      `Hold expires in ${minutes}:${seconds.toString().padStart(2, '0')}`,
+    holdExpiredTitle: 'Hold Expired',
+    holdExpiredMessage: 'Your seat hold has expired. Please select your seats again.',
+    cancellationRefundPolicy:
+      'In the event of a showtime cancellation, payments are automatically refunded to your original payment method via our immutable ledger.',
+    payWithFlutterwave: 'Pay with Flutterwave',
+    releaseSeatsAction: 'Release seats',
+    confirmingPaymentTitle: 'Confirming Payment',
+    confirmingPaymentMessage: 'Awaiting payment confirmation from Flutterwave…',
+    confirmationStillPending:
+      'Payment is still confirming. Your tickets will appear in My tickets shortly.',
+    viewMyTicketsAction: 'Go to My tickets',
+    paymentFailedTitle: 'Payment Incomplete',
+    paymentFailedMessage: 'Payment was not completed. Your seats have been released.',
+  },
+
+  tickets: {
+    myTicketsHeader: 'My Tickets',
+    emptyTicketsTitle: 'No Tickets Yet',
+    emptyTicketsMessage:
+      'You have not booked any cinema tickets yet. Explore now playing movies and reserve your view.',
+    browseMoviesAction: 'Browse movies',
+    ticketDetailTitle: 'Cinema Ticket',
+    qrRefreshAction: 'Refresh QR',
+    qrSecurityNote: 'Present this QR code at the cinema entrance. Dynamic security refreshes on every open.',
+    activeStatus: 'Active',
+    usedStatus: 'Used',
+    cancelledStatus: 'Cancelled',
+    usedAtTime: (time: string) => `Used at ${time}`,
+    cancelledRefundNotice: 'Showtime cancelled. Amount auto-refunded to original payment method via ledger.',
   },
 
   accessibility: {

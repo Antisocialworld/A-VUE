@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -12,22 +13,24 @@ import {
   MovieCard,
   ScreenShell,
   Skeleton,
+  TicketIcon,
   TmdbAttribution,
 } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
-import colorData from '../tokens/color-tokens-orange-green-yellow.json';
 import { MovieDto } from '../schemas/movies';
 import { moviesClient } from '../api/moviesClient';
 
 export interface MoviesHomeScreenProps {
   onSignOut: () => void;
   onSelectMovie: (movieId: number) => void;
+  onNavigateToTickets?: () => void;
 }
 
 export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   onSignOut,
   onSelectMovie,
+  onNavigateToTickets,
 }) => {
   const { spacing, colors, typography, mode, radius } = useTheme();
 
@@ -39,24 +42,74 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sign out button uses tone 60 in dark theme for >= 4.5:1 contrast
-  const signOutColor = mode === 'dark' ? colorData.palettes.error['60'] : colors.error;
-
   const headerRight = (
-    <Button
-      title={STRINGS.movies.signOutAction}
-      onPress={onSignOut}
-      variant="text"
-      textColor={signOutColor}
-      accessibilityLabel={STRINGS.movies.signOutAction}
-      accessibilityHint={STRINGS.movies.signOutAccessibilityHint}
-      style={{
-        minHeight: 44,
-        minWidth: 44,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-      }}
-    />
+    <View style={[styles.headerRightContainer, { gap: spacing.sm }]}>
+      {onNavigateToTickets && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={STRINGS.tickets.myTicketsHeader}
+          accessibilityHint="Navigates to your booked tickets"
+          onPress={onNavigateToTickets}
+          style={({ pressed }) => [
+            styles.myTicketsPill,
+            {
+              backgroundColor: pressed ? colors.primary_text_high : colors.primary,
+              borderRadius: radius.full,
+              paddingHorizontal: spacing.md,
+            },
+          ]}
+        >
+          <TicketIcon size={16} color={colors.on_primary} />
+          <Text
+            allowFontScaling
+            numberOfLines={1}
+            style={[
+              styles.myTicketsText,
+              {
+                color: colors.on_primary,
+                fontFamily: typography.labelLarge.fontFamily,
+                fontSize: typography.labelLarge.fontSize,
+                fontWeight: '700',
+                marginLeft: spacing.xs,
+              },
+            ]}
+          >
+            {STRINGS.tickets.myTicketsHeader}
+          </Text>
+        </Pressable>
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={STRINGS.movies.signOutAction}
+        accessibilityHint={STRINGS.movies.signOutAccessibilityHint}
+        onPress={onSignOut}
+        style={({ pressed }) => [
+          styles.signOutPill,
+          {
+            borderRadius: radius.full,
+            borderColor: pressed ? colors.outline : colors.outline_variant,
+            backgroundColor: pressed ? colors.surface_container_high : 'transparent',
+            paddingHorizontal: spacing.md,
+          },
+        ]}
+      >
+        <Text
+          allowFontScaling
+          numberOfLines={1}
+          style={[
+            styles.signOutText,
+            {
+              color: colors.on_surface_variant,
+              fontFamily: typography.labelLarge.fontFamily,
+              fontSize: typography.labelLarge.fontSize,
+              fontWeight: '500',
+            },
+          ]}
+        >
+          {STRINGS.movies.signOutAction}
+        </Text>
+      </Pressable>
+    </View>
   );
 
   const fetchMovies = useCallback(async (targetPage = 1, isRefresh = false) => {
@@ -210,6 +263,34 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerRightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  myTicketsPill: {
+    height: 44,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  myTicketsText: {
+    letterSpacing: 0.1,
+  },
+  signOutPill: {
+    height: 44,
+    minHeight: 44,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  signOutText: {
+    letterSpacing: 0.1,
   },
   cardWrapper: {
     flex: 1,

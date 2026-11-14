@@ -1,0 +1,235 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { ScreenShell } from '../components';
+import { useTheme } from '../context/ThemeContext';
+import { STRINGS } from '../constants/strings';
+import { cinemaClient } from '../api/cinemaClient';
+
+export interface WaitingRoomScreenProps {
+  showtimeId: string;
+  onAdmitted: (pass: string) => void;
+  onBack: () => void;
+  pollIntervalMs?: number;
+}
+
+export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
+  showtimeId,
+  onAdmitted,
+  onBack,
+  pollIntervalMs = 3000,
+}) => {
+  const { colors, spacing, typography, radius } = useTheme();
+
+  const [position, setPosition] = useState<number | undefined>(undefined);
+  const [estimatedWaitSeconds, setEstimatedWaitSeconds] = useState<number | undefined>(undefined);
+  const [isAdmitted, setIsAdmitted] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    const checkWaitingRoom = async () => {
+      try {
+        const data = await cinemaClient.getWaitingRoomStatus(showtimeId);
+        if (!isMountedRef.current) return;
+
+        if (data.status === 'admitted' && data.pass) {
+          setIsAdmitted(true);
+          onAdmitted(data.pass);
+          return;
+        }
+
+        setPosition(data.position);
+        setEstimatedWaitSeconds(data.estimatedWaitSeconds);
+      } catch (err: any) {
+        if (!isMountedRef.current) return;
+        setErrorMessage(err.message || STRINGS.common.genericError);
+      }
+    };
+
+    // Initial check
+    checkWaitingRoom();
+
+    // Poll every 3 seconds
+    const interval = setInterval(checkWaitingRoom, pollIntervalMs);
+
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+    };
+  }, [showtimeId, onAdmitted, pollIntervalMs]);
+
+  return (
+    <ScreenShell
+      title={STRINGS.waitingRoom.title}
+      onBack={onBack}
+      scrollable={false}
+      contentContainerStyle={[styles.container, { padding: spacing.xl }]}
+    >
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.surface_container_low,
+            borderColor: colors.outline_variant,
+            borderRadius: radius.md,
+            padding: spacing.xl,
+          },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: spacing.lg }} />
+
+        <Text
+          allowFontScaling
+          accessibilityRole="header"
+          style={[
+            styles.titleText,
+            {
+              color: colors.on_surface,
+              fontFamily: typography.titleLarge.fontFamily,
+              fontSize: typography.titleLarge.fontSize,
+              fontWeight: typography.titleLarge.fontWeight,
+            },
+          ]}
+        >
+          {isAdmitted ? STRINGS.waitingRoom.admittedMessage : STRINGS.waitingRoom.title}
+        </Text>
+
+        <Text
+          allowFontScaling
+          style={[
+            styles.subtitleText,
+            {
+              color: colors.on_surface_variant,
+              fontFamily: typography.bodyMedium.fontFamily,
+              fontSize: typography.bodyMedium.fontSize,
+              marginVertical: spacing.md,
+            },
+          ]}
+        >
+          {STRINGS.waitingRoom.subtitle}
+        </Text>
+
+        {position !== undefined && (
+          <View
+            style={[
+              styles.statBox,
+              {
+                backgroundColor: colors.surface_container_high,
+                borderRadius: radius.sm,
+                padding: spacing.md,
+                marginTop: spacing.sm,
+              },
+            ]}
+          >
+            <Text
+              allowFontScaling
+              style={[
+                styles.statLabel,
+                {
+                  color: colors.on_surface_variant,
+                  fontFamily: typography.labelMedium.fontFamily,
+                  fontSize: typography.labelMedium.fontSize,
+                },
+              ]}
+            >
+              {STRINGS.waitingRoom.rankLabel}
+            </Text>
+            <Text
+              allowFontScaling
+              style={[
+                styles.statValue,
+                {
+                  color: colors.primary,
+                  fontFamily: typography.headlineMedium.fontFamily,
+                  fontSize: typography.headlineMedium.fontSize,
+                  fontWeight: '700',
+                  marginTop: 2,
+                },
+              ]}
+            >
+              #{position}
+            </Text>
+          </View>
+        )}
+
+        {estimatedWaitSeconds !== undefined && (
+          <Text
+            allowFontScaling
+            style={[
+              styles.estimatedText,
+              {
+                color: colors.on_surface_variant,
+                fontFamily: typography.bodySmall.fontFamily,
+                fontSize: typography.bodySmall.fontSize,
+                marginTop: spacing.md,
+              },
+            ]}
+          >
+            {STRINGS.waitingRoom.estimatedWaitLabel}: {STRINGS.waitingRoom.secondsRemaining(estimatedWaitSeconds)}
+          </Text>
+        )}
+
+        {errorMessage && (
+          <Text
+            allowFontScaling
+            accessibilityRole="alert"
+            style={[
+              styles.errorText,
+              {
+                color: colors.error,
+                fontFamily: typography.bodySmall.fontFamily,
+                fontSize: typography.bodySmall.fontSize,
+                marginTop: spacing.md,
+              },
+            ]}
+          >
+            {errorMessage}
+          </Text>
+        )}
+      </View>
+    </ScreenShell>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    alignItems: 'center',
+    textAlign: 'center',
+  },
+  titleText: {
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  subtitleText: {
+    textAlign: 'center',
+  },
+  statBox: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  statLabel: {},
+  statValue: {},
+  estimatedText: {
+    textAlign: 'center',
+  },
+  errorText: {
+    textAlign: 'center',
+  },
+});
+

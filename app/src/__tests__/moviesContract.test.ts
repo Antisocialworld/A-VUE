@@ -190,3 +190,59 @@ describe('MoviesHomeScreen & MovieDetailScreen TMDB Attribution (Task B)', () =>
     expect(homeSource).not.toContain('onEndReached'); // Explicitly no infinite scroll
   });
 });
+
+describe('MoviesHomeScreen Header Restyle — Option B (Task 1)', () => {
+  const homeSource = fs.readFileSync(
+    path.resolve(__dirname, '../screens/MoviesHomeScreen.tsx'),
+    'utf-8',
+  );
+  const ticketIconSource = fs.readFileSync(
+    path.resolve(__dirname, '../components/TicketIcon.tsx'),
+    'utf-8',
+  );
+
+  it('header uses strings file keys for My tickets and Sign out without hardcoded labels', () => {
+    expect(homeSource).toContain('STRINGS.tickets.myTicketsHeader');
+    expect(homeSource).toContain('STRINGS.movies.signOutAction');
+    expect(homeSource).toContain('STRINGS.movies.signOutAccessibilityHint');
+  });
+
+  it('header contains zero hardcoded hex colors and uses design tokens exclusively', () => {
+    const headerMatch = homeSource.match(/const headerRight = \([\s\S]*?\);\n/);
+    expect(headerMatch).not.toBeNull();
+    const headerCode = headerMatch![0];
+
+    const hexRegex = /#[0-9a-fA-F]{3,8}/g;
+    expect(headerCode.match(hexRegex)).toBeNull();
+
+    // Verify token usages
+    expect(headerCode).toContain('colors.primary');
+    expect(headerCode).toContain('colors.on_primary');
+    expect(headerCode).toContain('colors.on_surface_variant');
+    expect(headerCode).toContain('colors.outline_variant');
+    expect(headerCode).toContain('radius.full');
+    expect(headerCode).toContain('spacing.sm');
+  });
+
+  it('My tickets pill is filled primary, height 44, fully rounded, and includes TicketIcon', () => {
+    expect(homeSource).toContain('<TicketIcon');
+    expect(homeSource).toContain('styles.myTicketsPill');
+    expect(homeSource).toContain("fontWeight: '700'");
+    expect(homeSource).toContain('accessibilityRole="button"');
+    expect(homeSource).toContain('accessibilityLabel={STRINGS.tickets.myTicketsHeader}');
+  });
+
+  it('Sign out pill is quiet outlined, height 44, fully rounded with muted text', () => {
+    expect(homeSource).toContain('styles.signOutPill');
+    expect(homeSource).toContain('color: colors.on_surface_variant');
+    expect(homeSource).toContain('accessibilityRole="button"');
+    expect(homeSource).toContain('accessibilityLabel={STRINGS.movies.signOutAction}');
+  });
+
+  it('TicketIcon is a valid SVG vector icon without hex colors', () => {
+    expect(ticketIconSource).toContain('<Svg');
+    expect(ticketIconSource).toContain('<Path');
+    expect(ticketIconSource).toContain('strokeDasharray="2 2"');
+    expect(ticketIconSource.match(/#[0-9a-fA-F]{3,8}/g)).toBeNull();
+  });
+});

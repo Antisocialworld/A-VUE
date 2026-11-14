@@ -9,7 +9,15 @@ import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen';
 import { ComponentGalleryScreen } from './src/screens/ComponentGalleryScreen';
 import { MoviesHomeScreen } from './src/screens/MoviesHomeScreen';
 import { MovieDetailScreen } from './src/screens/MovieDetailScreen';
+import { ShowtimesScreen } from './src/screens/ShowtimesScreen';
+import { SeatMapScreen } from './src/screens/SeatMapScreen';
+import { WaitingRoomScreen } from './src/screens/WaitingRoomScreen';
+import { CheckoutScreen } from './src/screens/CheckoutScreen';
+import { TicketScreen } from './src/screens/TicketScreen';
+import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
 import { authClient, AuthSession } from './src/api/authClient';
+import { cinemaClient } from './src/api/cinemaClient';
+import { HoldSeatsResponse, SeatMapItem, ShowtimeItem } from './src/schemas/cinema';
 
 type ScreenRoute =
   | 'welcome'
@@ -18,12 +26,24 @@ type ScreenRoute =
   | 'reset_password'
   | 'gallery'
   | 'movies'
-  | 'movie_detail';
+  | 'movie_detail'
+  | 'showtimes'
+  | 'seat_map'
+  | 'waiting_room'
+  | 'checkout'
+  | 'ticket'
+  | 'my_tickets';
 
 const MainNavigator: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<ScreenRoute>('welcome');
   const [activeSession, setActiveSession] = useState<AuthSession | null>(null);
   const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
+  const [selectedMovieTitle, setSelectedMovieTitle] = useState<string>('');
+  const [selectedShowtime, setSelectedShowtime] = useState<ShowtimeItem | null>(null);
+  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
+  const [selectedSeats, setSelectedSeats] = useState<SeatMapItem[]>([]);
+  const [holdResponse, setHoldResponse] = useState<HoldSeatsResponse | null>(null);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
   const handleSignInSuccess = (session: AuthSession) => {
     setActiveSession(session);
@@ -88,6 +108,7 @@ const MainNavigator: React.FC = () => {
           setSelectedMovieId(id);
           setCurrentRoute('movie_detail');
         }}
+        onNavigateToTickets={() => setCurrentRoute('my_tickets')}
       />
     );
   }
@@ -100,6 +121,103 @@ const MainNavigator: React.FC = () => {
           setSelectedMovieId(null);
           setCurrentRoute('movies');
         }}
+        onGetTickets={(id, title) => {
+          setSelectedMovieId(id);
+          setSelectedMovieTitle(title);
+          setCurrentRoute('showtimes');
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === 'showtimes' && selectedMovieId !== null) {
+    return (
+      <ShowtimesScreen
+        movieId={selectedMovieId}
+        movieTitle={selectedMovieTitle || 'Showtimes'}
+        onBack={() => setCurrentRoute('movie_detail')}
+        onSelectShowtime={(st) => {
+          setSelectedShowtime(st);
+          setCurrentRoute('seat_map');
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === 'seat_map' && selectedShowtime !== null) {
+    return (
+      <SeatMapScreen
+        showtime={selectedShowtime}
+        movieTitle={selectedMovieTitle || 'Select Seats'}
+        onBack={() => setCurrentRoute('showtimes')}
+        onProceedToCheckout={(params) => {
+          setSelectedSeatIds(params.selectedSeatIds);
+          setSelectedSeats(params.selectedSeats);
+          setHoldResponse(params.holdResponse);
+          setCurrentRoute('checkout');
+        }}
+        onOpenWaitingRoom={(seatIds) => {
+          setSelectedSeatIds(seatIds);
+          setCurrentRoute('waiting_room');
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === 'waiting_room' && selectedShowtime !== null) {
+    return (
+      <WaitingRoomScreen
+        showtimeId={selectedShowtime.id}
+        onBack={() => setCurrentRoute('seat_map')}
+        onAdmitted={async (pass) => {
+          try {
+            const holdRes = await cinemaClient.holdSeats(selectedShowtime.id, selectedSeatIds, pass);
+            setHoldResponse(holdRes);
+            setCurrentRoute('checkout');
+          } catch {
+            setCurrentRoute('seat_map');
+          }
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === 'checkout' && selectedShowtime !== null && holdResponse !== null) {
+    return (
+      <CheckoutScreen
+        showtime={selectedShowtime}
+        selectedSeatIds={selectedSeatIds}
+        selectedSeats={selectedSeats}
+        holdResponse={holdResponse}
+        movieTitle={selectedMovieTitle || 'Checkout'}
+        onBack={() => setCurrentRoute('seat_map')}
+        onPaymentSuccess={(ticketId) => {
+          setSelectedTicketId(ticketId);
+          setCurrentRoute('ticket');
+        }}
+        onGoToMyTickets={() => setCurrentRoute('my_tickets')}
+      />
+    );
+  }
+
+  if (currentRoute === 'ticket' && selectedTicketId !== null) {
+    return (
+      <TicketScreen
+        ticketId={selectedTicketId}
+        onBack={() => setCurrentRoute('my_tickets')}
+      />
+    );
+  }
+
+  if (currentRoute === 'my_tickets') {
+    return (
+      <MyTicketsScreen
+        onBack={() => setCurrentRoute('movies')}
+        onSelectTicket={(ticket) => {
+          setSelectedTicketId(ticket.id);
+          setCurrentRoute('ticket');
+        }}
+        onBrowseMovies={() => setCurrentRoute('movies')}
       />
     );
   }
