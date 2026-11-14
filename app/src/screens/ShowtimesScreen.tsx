@@ -7,12 +7,15 @@ import {
   Text,
   View,
 } from 'react-native';
+import Svg, { Defs, G, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Button, EmptyState, ScreenShell, Skeleton } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { ShowtimeItem } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
 import { formatKoboToNaira } from '../utils/money';
+import { WORDMARK_BOX, WORDMARK_PATHS } from '../components/Wordmark';
+import colorData from '../tokens/color-tokens-orange-green-yellow.json';
 
 export interface ShowtimesScreenProps {
   movieId: number | string;
@@ -390,131 +393,196 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
           />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.scrollContent, { padding: spacing.base, paddingBottom: spacing.xxl }]}>
-          {cinemaGroups.map((group) => (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[styles.scrollContent, { flexGrow: 1, paddingBottom: 0 }]}
+        >
+          <View style={{ padding: spacing.base }}>
+            {cinemaGroups.map((group) => (
+              <View
+                key={group.cinemaName}
+                style={[
+                  styles.cinemaCard,
+                  {
+                    backgroundColor: colors.surface_container_low,
+                    borderColor: colors.outline_variant,
+                    borderRadius: radius.md,
+                    padding: spacing.base,
+                    marginBottom: spacing.base,
+                  },
+                ]}
+              >
+                <Text
+                  allowFontScaling
+                  accessibilityRole="header"
+                  style={[
+                    styles.cinemaName,
+                    {
+                      color: colors.on_surface,
+                      fontFamily: typography.titleMedium.fontFamily,
+                      fontSize: typography.titleMedium.fontSize,
+                      fontWeight: typography.titleMedium.fontWeight,
+                    },
+                  ]}
+                >
+                  {group.cinemaName}
+                </Text>
+                <Text
+                  allowFontScaling
+                  style={[
+                    styles.cinemaCity,
+                    {
+                      color: colors.on_surface_variant,
+                      fontFamily: typography.bodySmall.fontFamily,
+                      fontSize: typography.bodySmall.fontSize,
+                      marginTop: 2,
+                      marginBottom: spacing.md,
+                    },
+                  ]}
+                >
+                  {group.city}
+                </Text>
+
+                {/* Time Tiles Grid */}
+                <View style={styles.tilesGrid}>
+                  {group.items.map((st) => {
+                    const isSoldOut = st.isCancelled;
+                    const priceText = formatKoboToNaira(st.priceKobo);
+                    const timeStr = formatShowtimeHours(st.startsAt);
+
+                    return (
+                      <Pressable
+                        key={st.id}
+                        onPress={() => onSelectShowtime(st)}
+                        disabled={isSoldOut}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${timeStr}, ${st.hallName}, ${priceText}${isSoldOut ? ', sold out' : ''}`}
+                        accessibilityState={{ disabled: isSoldOut }}
+                        style={({ pressed }) => [
+                          styles.timeTile,
+                          {
+                            backgroundColor: isSoldOut
+                              ? colors.surface_container_highest
+                              : pressed
+                              ? colors.surface_container_high
+                              : colors.surface_container,
+                            borderColor: colors.outline_variant,
+                            borderRadius: radius.sm,
+                            padding: spacing.sm,
+                            opacity: isSoldOut ? 0.5 : 1,
+                          },
+                        ]}
+                      >
+                        <Text
+                          allowFontScaling
+                          style={[
+                            styles.timeText,
+                            {
+                              color: colors.on_surface,
+                              fontFamily: typography.titleMedium.fontFamily,
+                              fontSize: typography.titleMedium.fontSize,
+                              fontWeight: '700',
+                            },
+                          ]}
+                        >
+                          {timeStr}
+                        </Text>
+                        <Text
+                          allowFontScaling
+                          style={[
+                            styles.hallText,
+                            {
+                              color: colors.on_surface_variant,
+                              fontFamily: typography.labelSmall.fontFamily,
+                              fontSize: 10,
+                              marginTop: 2,
+                            },
+                          ]}
+                        >
+                          {st.hallName}
+                        </Text>
+                        <Text
+                          allowFontScaling
+                          style={[
+                            styles.priceText,
+                            {
+                              color: colors.primary,
+                              fontFamily: typography.labelSmall.fontFamily,
+                              fontSize: typography.labelSmall.fontSize,
+                              fontWeight: '600',
+                              marginTop: 4,
+                            },
+                          ]}
+                        >
+                          {isSoldOut ? STRINGS.showtimes.soldOut : priceText}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Footer Photo after last cinema card with top fade, dim overlay, and lettering watermark */}
+          <View style={styles.footerPhotoContainer}>
+            <Image
+              source={require('../../assets/photos/showtimes.jpg')}
+              accessibilityRole="image"
+              accessibilityLabel={STRINGS.showtimes.footerPhotoAccessibilityLabel}
+              style={styles.footerPhoto}
+            />
+            {/* Top edge fade into background token colour */}
+            <Svg
+              style={StyleSheet.absoluteFill}
+              width="100%"
+              height="100%"
+              pointerEvents="none"
+            >
+              <Defs>
+                <LinearGradient id="showtimesTopFade" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={colors.surface} stopOpacity="1" />
+                  <Stop offset="0.5" stopColor={colors.surface} stopOpacity="0.4" />
+                  <Stop offset="1" stopColor={colors.surface} stopOpacity="0" />
+                </LinearGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill="url(#showtimesTopFade)" />
+            </Svg>
+            {/* Dimming overlay with token colour */}
             <View
-              key={group.cinemaName}
+              pointerEvents="none"
               style={[
-                styles.cinemaCard,
+                StyleSheet.absoluteFill,
                 {
-                  backgroundColor: colors.surface_container_low,
-                  borderColor: colors.outline_variant,
-                  borderRadius: radius.md,
-                  padding: spacing.base,
-                  marginBottom: spacing.base,
+                  backgroundColor: colors.scrim,
+                  opacity: 0.35,
                 },
               ]}
+            />
+            {/* A VUE Lettering Watermark drawn in code */}
+            <View
+              accessible={false}
+              accessibilityElementsHidden={true}
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              style={styles.watermarkCenter}
             >
-              <Text
-                allowFontScaling
-                accessibilityRole="header"
-                style={[
-                  styles.cinemaName,
-                  {
-                    color: colors.on_surface,
-                    fontFamily: typography.titleMedium.fontFamily,
-                    fontSize: typography.titleMedium.fontSize,
-                    fontWeight: typography.titleMedium.fontWeight,
-                  },
-                ]}
+              <Svg
+                width={120}
+                height={120 / (WORDMARK_BOX.w / WORDMARK_BOX.h)}
+                viewBox={`0 0 ${WORDMARK_BOX.w} ${WORDMARK_BOX.h}`}
+                fill="none"
+                accessible={false}
+                style={{ opacity: 0.2 }}
               >
-                {group.cinemaName}
-              </Text>
-              <Text
-                allowFontScaling
-                style={[
-                  styles.cinemaCity,
-                  {
-                    color: colors.on_surface_variant,
-                    fontFamily: typography.bodySmall.fontFamily,
-                    fontSize: typography.bodySmall.fontSize,
-                    marginTop: 2,
-                    marginBottom: spacing.md,
-                  },
-                ]}
-              >
-                {group.city}
-              </Text>
-
-              {/* Time Tiles Grid */}
-              <View style={styles.tilesGrid}>
-                {group.items.map((st) => {
-                  const isSoldOut = st.isCancelled;
-                  const priceText = formatKoboToNaira(st.priceKobo);
-                  const timeStr = formatShowtimeHours(st.startsAt);
-
-                  return (
-                    <Pressable
-                      key={st.id}
-                      onPress={() => onSelectShowtime(st)}
-                      disabled={isSoldOut}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${timeStr}, ${st.hallName}, ${priceText}${isSoldOut ? ', sold out' : ''}`}
-                      accessibilityState={{ disabled: isSoldOut }}
-                      style={({ pressed }) => [
-                        styles.timeTile,
-                        {
-                          backgroundColor: isSoldOut
-                            ? colors.surface_container_highest
-                            : pressed
-                            ? colors.surface_container_high
-                            : colors.surface_container,
-                          borderColor: colors.outline_variant,
-                          borderRadius: radius.sm,
-                          padding: spacing.sm,
-                          opacity: isSoldOut ? 0.5 : 1,
-                        },
-                      ]}
-                    >
-                      <Text
-                        allowFontScaling
-                        style={[
-                          styles.timeText,
-                          {
-                            color: colors.on_surface,
-                            fontFamily: typography.titleMedium.fontFamily,
-                            fontSize: typography.titleMedium.fontSize,
-                            fontWeight: '700',
-                          },
-                        ]}
-                      >
-                        {timeStr}
-                      </Text>
-                      <Text
-                        allowFontScaling
-                        style={[
-                          styles.hallText,
-                          {
-                            color: colors.on_surface_variant,
-                            fontFamily: typography.labelSmall.fontFamily,
-                            fontSize: 10,
-                            marginTop: 2,
-                          },
-                        ]}
-                      >
-                        {st.hallName}
-                      </Text>
-                      <Text
-                        allowFontScaling
-                        style={[
-                          styles.priceText,
-                          {
-                            color: colors.primary,
-                            fontFamily: typography.labelSmall.fontFamily,
-                            fontSize: typography.labelSmall.fontSize,
-                            fontWeight: '600',
-                            marginTop: 4,
-                          },
-                        ]}
-                      >
-                        {isSoldOut ? STRINGS.showtimes.soldOut : priceText}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                <G fill={colorData.palettes.primary['80']}>
+                  {WORDMARK_PATHS.map((item) => (
+                    <Path key={item.id} d={item.d} fill={colorData.palettes.primary['80']} />
+                  ))}
+                </G>
+              </Svg>
             </View>
-          ))}
+          </View>
         </ScrollView>
       )}
     </ScreenShell>
@@ -606,5 +674,30 @@ const styles = StyleSheet.create({
   timeText: {},
   hallText: {},
   priceText: {},
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  footerPhotoContainer: {
+    width: '100%',
+    aspectRatio: 1400 / 764,
+    marginTop: 'auto',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  footerPhoto: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  watermarkCenter: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });
 

@@ -157,10 +157,12 @@ export const STRINGS = {
     fewLeft: 'Few left',
     seatsLeft: (count: number) => `${count} left`,
     selectSeatsAction: 'Select seats',
+    footerPhotoAccessibilityLabel: 'Cinema auditorium showing screen and seating',
   },
 
   seatMap: {
     title: 'Select Seats',
+    photoAccessibilityLabel: 'Auditorium seats view',
     screenIndicator: 'SCREEN',
     availableLegend: 'Available',
     selectedLegend: 'Selected',
