@@ -6,7 +6,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "icon": "./assets/logo/a-vue-logo-dark.png",
+    "icon": "./assets/logo/a-vue-icon-1024.png",
     "android": {
       "package": "app.avuemovies",
       "adaptiveIcon": {

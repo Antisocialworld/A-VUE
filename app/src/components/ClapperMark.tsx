@@ -3,7 +3,7 @@ import { StyleProp, View, ViewStyle } from 'react-native';
 import Svg, { G, Path, Polygon, Rect } from 'react-native-svg';
 import { STRINGS } from '../constants/strings';
 import colorData from '../tokens/color-tokens-orange-green-yellow.json';
-import { WORDMARK_PATHS } from './Wordmark';
+import { WORDMARK_BOX, WORDMARK_PATHS } from './Wordmark';
 
 export interface ClapperMarkProps {
   size?: number;
@@ -26,7 +26,7 @@ export interface ClapperMarkProps {
  *   Width: 87% W (93.96)
  *   Height: 65% H (37.70)
  *   Corner radius: 4.6% W (4.97)
- *   Name centred, width: 69% W (74.52) -> x=62.74, y=112.13, scale=0.44357
+ *   Name centred, width: 64% W (69.12) -> x=65.44, y=114.39, scale=0.11958 (A1 chevron filled lettering)
  */
 export const ClapperMark: React.FC<ClapperMarkProps> = ({
   size = 140,
@@ -56,12 +56,12 @@ export const ClapperMark: React.FC<ClapperMarkProps> = ({
   const panelH = 0.65 * boardH; // 37.70
   const panelRx = 0.046 * boardW; // 4.97
 
-  // Wordmark placement (centred inside panel)
-  const nameW = 0.69 * boardW; // 74.52
-  const nameScale = nameW / 168; // 0.44357
-  const nameH = 40 * nameScale; // 17.74
-  const nameX = panelX + (panelW - nameW) / 2; // 62.74
-  const nameY = panelY + (panelH - nameH) / 2; // 112.13
+  // Wordmark placement (centred inside panel with A1 chevron filled lettering)
+  const nameW = 0.64 * boardW; // 69.12
+  const nameScale = nameW / WORDMARK_BOX.w; // 69.12 / 578 ≈ 0.11958
+  const nameLettersH = (WORDMARK_BOX.bottom - WORDMARK_BOX.top) * nameScale;
+  const nameX = panelX + (panelW - nameW) / 2; // 65.44
+  const nameY = panelY + (panelH - nameLettersH) / 2 - WORDMARK_BOX.top * nameScale; // 114.39
 
   return (
     <View
@@ -105,20 +105,13 @@ export const ClapperMark: React.FC<ClapperMarkProps> = ({
           fill={panelColor}
         />
 
-        {/* "A VUE" Wordmark inside the panel */}
+        {/* "A VUE" Wordmark inside the panel (filled A1 chevron lettering) */}
         <G transform={`translate(${nameX}, ${nameY}) scale(${nameScale})`}>
-          <G
-            stroke={nameColor}
-            strokeWidth={6}
-            strokeLinecap="butt"
-            strokeLinejoin="miter"
-            strokeMiterlimit={1.5}
-          >
+          <G fill={nameColor}>
             {WORDMARK_PATHS.map((item) => (
               <Path
                 key={item.id}
                 d={item.d}
-                transform={item.transform}
               />
             ))}
           </G>

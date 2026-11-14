@@ -23,6 +23,8 @@ export interface ScreenShellProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   style?: StyleProp<ViewStyle>;
   headerRight?: React.ReactNode;
+  titleAlign?: 'center' | 'left';
+  headerInset?: number;
 }
 
 export const ScreenShell: React.FC<ScreenShellProps> = ({
@@ -33,8 +35,12 @@ export const ScreenShell: React.FC<ScreenShellProps> = ({
   contentContainerStyle,
   style,
   headerRight,
+  titleAlign = 'center',
+  headerInset,
 }) => {
   const { colors, spacing, typography, mode } = useTheme();
+
+  const effectiveHeaderInset = headerInset !== undefined ? headerInset : spacing.base;
 
   const renderHeader = () => {
     if (!title && !onBack && !headerRight) {
@@ -46,13 +52,22 @@ export const ScreenShell: React.FC<ScreenShellProps> = ({
         style={[
           styles.headerRow,
           {
-            paddingHorizontal: spacing.base,
+            paddingLeft: effectiveHeaderInset,
+            paddingRight: effectiveHeaderInset,
             paddingVertical: spacing.sm,
             minHeight: 48,
           },
         ]}
       >
-        <View style={styles.headerLeft}>
+        <View
+          style={[
+            styles.headerLeft,
+            titleAlign === 'left' && [
+              styles.headerLeftAlignLeft,
+              { marginRight: spacing.base },
+            ],
+          ]}
+        >
           {onBack && (
             <Pressable
               accessibilityRole="button"
@@ -83,21 +98,19 @@ export const ScreenShell: React.FC<ScreenShellProps> = ({
               </Text>
             </Pressable>
           )}
-        </View>
-
-        <View style={styles.headerCenter}>
-          {title ? (
+          {titleAlign === 'left' && title ? (
             <Text
               allowFontScaling
               accessibilityRole="header"
               numberOfLines={1}
+              ellipsizeMode="tail"
               style={[
-                styles.headerTitle,
+                styles.headerTitleLeft,
                 {
                   color: colors.on_surface,
-                  fontFamily: typography.titleMedium.fontFamily,
-                  fontSize: typography.titleMedium.fontSize,
-                  fontWeight: typography.titleMedium.fontWeight,
+                  fontFamily: typography.titleLargeReduced.fontFamily,
+                  fontSize: typography.titleLargeReduced.fontSize,
+                  fontWeight: typography.titleLargeReduced.fontWeight,
                 },
               ]}
             >
@@ -106,7 +119,37 @@ export const ScreenShell: React.FC<ScreenShellProps> = ({
           ) : null}
         </View>
 
-        <View style={styles.headerRight}>{headerRight}</View>
+        {titleAlign === 'center' ? (
+          <View style={styles.headerCenter}>
+            {title ? (
+              <Text
+                allowFontScaling
+                accessibilityRole="header"
+                numberOfLines={1}
+                style={[
+                  styles.headerTitle,
+                  {
+                    color: colors.on_surface,
+                    fontFamily: typography.titleMedium.fontFamily,
+                    fontSize: typography.titleMedium.fontSize,
+                    fontWeight: typography.titleMedium.fontWeight,
+                  },
+                ]}
+              >
+                {title}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        <View
+          style={[
+            styles.headerRight,
+            titleAlign === 'left' && styles.headerRightAlignLeft,
+          ]}
+        >
+          {headerRight}
+        </View>
       </View>
     );
   };
@@ -175,6 +218,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
+  headerLeftAlignLeft: {
+    flex: 1,
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    minWidth: 0,
+  },
   headerCenter: {
     flex: 1,
     alignItems: 'center',
@@ -185,6 +236,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
+  headerRightAlignLeft: {
+    minWidth: 0,
+    flexShrink: 0,
+  },
   backButton: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -194,6 +249,10 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     textAlign: 'center',
+  },
+  headerTitleLeft: {
+    textAlign: 'left',
+    flexShrink: 1,
   },
   scrollContent: {
     flexGrow: 1,

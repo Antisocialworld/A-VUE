@@ -30,7 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     version: config.version || '1.0.0',
     orientation: config.orientation || 'portrait',
     userInterfaceStyle: config.userInterfaceStyle || 'automatic',
-    icon: config.icon || './assets/logo/a-vue-logo-dark.png',
+    icon: config.icon || './assets/logo/a-vue-icon-1024.png',
     android: {
       ...config.android,
       package: 'app.avuemovies',

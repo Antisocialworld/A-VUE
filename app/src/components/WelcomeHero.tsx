@@ -4,7 +4,7 @@ import Svg, { Circle, Ellipse, G, Line, Path, Polygon, Rect } from 'react-native
 import { STRINGS } from '../constants/strings';
 import { getHeroGeometry } from '../constants/heroGeometry';
 import colorData from '../tokens/color-tokens-orange-green-yellow.json';
-import { WORDMARK_PATHS } from './Wordmark';
+import { WORDMARK_BOX, WORDMARK_PATHS } from './Wordmark';
 
 export interface WelcomeHeroProps {
   width?: number;
@@ -24,7 +24,7 @@ export interface WelcomeHeroProps {
  * - Token fills:
  *   Board: palette primary 40 (#FD550A)
  *   Panel: palette neutral 6 (#1A110F, dark surface)
- *   Name: palette primary 80 (#FFCEBE)
+ *   Name: palette primary 80 (#FFCEBE, A1 chevron filled lettering)
  *   Lid stripes: brand crest yellow (#E0F354)
  */
 export const WelcomeHero: React.FC<WelcomeHeroProps> = ({
@@ -60,12 +60,12 @@ export const WelcomeHero: React.FC<WelcomeHeroProps> = ({
   const panelH = 0.65 * boardH; // 37.70
   const panelRx = 0.046 * boardW; // 4.97
 
-  // Wordmark placement (centred inside panel)
-  const nameW = 0.69 * boardW; // 74.52
-  const nameScale = nameW / 168; // 0.44357
-  const nameH = 40 * nameScale; // 17.74
-  const nameX = panelX + (panelW - nameW) / 2; // 62.74
-  const nameY = panelY + (panelH - nameH) / 2; // 112.13
+  // Wordmark placement (centred inside panel with A1 chevron filled lettering)
+  const nameW = 0.64 * boardW; // 69.12
+  const nameScale = nameW / WORDMARK_BOX.w; // 69.12 / 578 ≈ 0.11958
+  const nameLettersH = (WORDMARK_BOX.bottom - WORDMARK_BOX.top) * nameScale;
+  const nameX = panelX + (panelW - nameW) / 2; // 65.44
+  const nameY = panelY + (panelH - nameLettersH) / 2 - WORDMARK_BOX.top * nameScale; // 114.39
 
   return (
     <View
@@ -114,20 +114,13 @@ export const WelcomeHero: React.FC<WelcomeHeroProps> = ({
             fill={panelColor}
           />
 
-          {/* Wordmark inside panel */}
+          {/* Wordmark inside panel (filled A1 chevron lettering) */}
           <G transform={`translate(${nameX}, ${nameY}) scale(${nameScale})`}>
-            <G
-              stroke={nameColor}
-              strokeWidth={6}
-              strokeLinecap="butt"
-              strokeLinejoin="miter"
-              strokeMiterlimit={1.5}
-            >
+            <G fill={nameColor}>
               {WORDMARK_PATHS.map((item) => (
                 <Path
                   key={item.id}
                   d={item.d}
-                  transform={item.transform}
                 />
               ))}
             </G>

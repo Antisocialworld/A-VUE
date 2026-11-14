@@ -190,9 +190,15 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
     </View>
   );
 
+  // Real outer horizontal inset of movie cards from screen edge:
+  // ScreenShell fixed content padding (spacing.base) + FlatList contentContainerStyle padding (spacing.base) = 32 pt.
+  const cardGridInset = spacing.base + spacing.base;
+
   return (
     <ScreenShell
       title={STRINGS.movies.header}
+      titleAlign="left"
+      headerInset={cardGridInset}
       headerRight={headerRight}
       scrollable={false}
       contentContainerStyle={styles.container}
