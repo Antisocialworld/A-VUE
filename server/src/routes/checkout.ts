@@ -5,7 +5,7 @@ import { createFlutterwavePaymentLink } from '../lib/flutterwave.js';
 import { verifyUserHolds } from '../lib/holds.js';
 import { processWebhookEvent } from '../lib/jobs.js';
 import { checkoutRateLimit } from '../lib/rateLimit.js';
-import { getSessionUser } from '../lib/session.js';
+import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 import { checkoutBodySchema } from '../schemas/cinema.js';
 
 export async function checkoutRoutes(fastify: FastifyInstance) {
@@ -19,14 +19,17 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const allowed = await checkoutRateLimit(request, reply, user.id);

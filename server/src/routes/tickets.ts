@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isAdmin } from '../env.js';
 import { writerPool } from '../lib/db.js';
-import { getSessionUser } from '../lib/session.js';
+import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 
 export async function ticketRoutes(fastify: FastifyInstance) {
   /**
@@ -14,14 +14,17 @@ export async function ticketRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const pool = writerPool;
@@ -72,14 +75,17 @@ export async function ticketRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const { id: ticketId } = request.params as { id: string };
@@ -125,14 +131,17 @@ export async function ticketRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     // Task 5: Gatekeeper / Admin authorization guard

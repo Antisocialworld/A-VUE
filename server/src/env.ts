@@ -97,6 +97,24 @@ const envSchema = z.object({
 
   // Authorization (Task 5)
   ADMIN_EMAILS: z.string().optional().default(''),
+}).superRefine((data, ctx) => {
+  // In production, require FLUTTERWAVE_SECRET_HASH and FLUTTERWAVE_SECRET_KEY to be non-empty (Task 1)
+  if (data.NODE_ENV === 'production') {
+    if (!data.FLUTTERWAVE_SECRET_HASH || data.FLUTTERWAVE_SECRET_HASH.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FLUTTERWAVE_SECRET_HASH'],
+        message: 'FLUTTERWAVE_SECRET_HASH must be non-empty in production',
+      });
+    }
+    if (!data.FLUTTERWAVE_SECRET_KEY || data.FLUTTERWAVE_SECRET_KEY.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FLUTTERWAVE_SECRET_KEY'],
+        message: 'FLUTTERWAVE_SECRET_KEY must be non-empty in production',
+      });
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

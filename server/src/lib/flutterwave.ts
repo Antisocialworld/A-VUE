@@ -61,7 +61,7 @@ export async function createFlutterwavePaymentLink(
   }
 
   // 2. Real Flutterwave Test Mode API Call
-  const secretKey = env.FLUTTERWAVE_SECRET_KEY || process.env.FLUTTERWAVE_SECRET_KEY;
+  const secretKey = env.FLUTTERWAVE_SECRET_KEY;
   if (!secretKey) {
     throw new Error('FLUTTERWAVE_SECRET_KEY_MISSING');
   }
@@ -124,22 +124,23 @@ export function verifyFlutterwaveSignature(
   rawBody: Buffer | string,
   headers: Record<string, string | string[] | undefined>
 ): boolean {
-  const secretHash = env.FLUTTERWAVE_SECRET_HASH || process.env.FLUTTERWAVE_SECRET_HASH;
+  // Reads only validated env; empty, unset, or whitespace-only returns false (Task 1 & Task 5)
+  const secretHash = env.FLUTTERWAVE_SECRET_HASH;
   if (!secretHash || secretHash.trim().length === 0) {
     process.stderr.write('[Flutterwave Webhook Error] FLUTTERWAVE_SECRET_HASH not configured in env\n');
     return false;
   }
 
   const verifHashHeader = headers['verif-hash'];
-  if (typeof verifHashHeader !== 'string' || verifHashHeader.length === 0) {
+  if (typeof verifHashHeader !== 'string' || verifHashHeader.trim().length === 0) {
     return false;
   }
 
   const headerBuf = Buffer.from(verifHashHeader, 'utf-8');
   const secretBuf = Buffer.from(secretHash, 'utf-8');
 
-  // Length check before constant-time comparison
-  if (headerBuf.length !== secretBuf.length) {
+  // Prevent any empty buffer comparisons; empty header & empty secret must never compare equal
+  if (headerBuf.length === 0 || secretBuf.length === 0 || headerBuf.length !== secretBuf.length) {
     return false;
   }
 
@@ -157,7 +158,7 @@ export function verifyFlutterwaveSignature(
 export async function verifyTransactionWithFlutterwave(
   transactionIdOrRef: string | number
 ): Promise<FlutterwaveVerifiedTransaction> {
-  const secretKey = env.FLUTTERWAVE_SECRET_KEY || process.env.FLUTTERWAVE_SECRET_KEY;
+  const secretKey = env.FLUTTERWAVE_SECRET_KEY;
   if (!secretKey) {
     throw new Error('FLUTTERWAVE_SECRET_KEY_MISSING');
   }

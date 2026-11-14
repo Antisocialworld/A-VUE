@@ -23,6 +23,8 @@ describe('Checkout & Payment Initiation (Rule 02 / Rule 04 / Task 6)', () => {
       DATABASE_URL: 'postgres://user:pass@localhost:5432/avue',
       REDIS_URL: 'redis://localhost:6379',
       PAYMENT_SIMULATOR: 'true',
+      FLUTTERWAVE_SECRET_HASH: 'dummy_hash',
+      FLUTTERWAVE_SECRET_KEY: 'dummy_key',
       SMTP_HOST: 'smtp-relay.brevo.com',
       SMTP_PORT: '587',
       SMTP_USER: 'relay-user',

@@ -41,11 +41,75 @@ describe('Server Environment Validation (Rule 02)', () => {
       ...validBaseEnv,
       NODE_ENV: 'production',
       PAYMENT_SIMULATOR: 'true',
+      FLUTTERWAVE_SECRET_HASH: 'dummy_hash',
+      FLUTTERWAVE_SECRET_KEY: 'dummy_key',
     };
 
     expect(() => validateEnv(invalidProdEnv)).toThrowError(
       /PAYMENT_SIMULATOR must be false in production/,
     );
+  });
+
+  it('fails production boot when FLUTTERWAVE_SECRET_HASH or FLUTTERWAVE_SECRET_KEY is missing or whitespace, reporting KEY NAMES ONLY', () => {
+    const prodEnvWithoutFlw = {
+      ...validBaseEnv,
+      NODE_ENV: 'production',
+      SMTP_HOST: 'smtp-relay.brevo.com',
+      SMTP_PORT: '587',
+      SMTP_USER: 'relay-user',
+      SMTP_PASS: 'relay-pass',
+    };
+
+    // 1. Missing both: fails and error contains key names only
+    try {
+      validateEnv(prodEnvWithoutFlw);
+      expect.unreachable('Should have thrown on missing Flutterwave keys');
+    } catch (err: any) {
+      expect(err.message).toContain('FLUTTERWAVE_SECRET_HASH');
+      expect(err.message).toContain('FLUTTERWAVE_SECRET_KEY');
+      expect(err.message).toContain('[FATAL] Environment configuration failure. Invalid or missing environment keys:');
+      // Rule 02: KEY NAMES ONLY, never leak values
+      expect(err.message).not.toContain('relay-pass');
+    }
+
+    // 2. Missing FLUTTERWAVE_SECRET_KEY
+    try {
+      validateEnv({
+        ...prodEnvWithoutFlw,
+        FLUTTERWAVE_SECRET_HASH: 'dummy_hash',
+      });
+      expect.unreachable('Should have thrown on missing FLUTTERWAVE_SECRET_KEY');
+    } catch (err: any) {
+      expect(err.message).toContain('FLUTTERWAVE_SECRET_KEY');
+      expect(err.message).not.toContain('FLUTTERWAVE_SECRET_HASH');
+      expect(err.message).not.toContain('dummy_hash');
+    }
+
+    // 3. Whitespace-only FLUTTERWAVE_SECRET_HASH
+    try {
+      validateEnv({
+        ...prodEnvWithoutFlw,
+        FLUTTERWAVE_SECRET_HASH: '   ',
+        FLUTTERWAVE_SECRET_KEY: 'dummy_key',
+      });
+      expect.unreachable('Should have thrown on whitespace FLUTTERWAVE_SECRET_HASH');
+    } catch (err: any) {
+      expect(err.message).toContain('FLUTTERWAVE_SECRET_HASH');
+      expect(err.message).not.toContain('dummy_key');
+    }
+
+    // 4. Whitespace-only FLUTTERWAVE_SECRET_KEY
+    try {
+      validateEnv({
+        ...prodEnvWithoutFlw,
+        FLUTTERWAVE_SECRET_HASH: 'dummy_hash',
+        FLUTTERWAVE_SECRET_KEY: '   ',
+      });
+      expect.unreachable('Should have thrown on whitespace FLUTTERWAVE_SECRET_KEY');
+    } catch (err: any) {
+      expect(err.message).toContain('FLUTTERWAVE_SECRET_KEY');
+      expect(err.message).not.toContain('dummy_hash');
+    }
   });
 });
 

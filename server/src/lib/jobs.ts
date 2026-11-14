@@ -8,14 +8,74 @@
 import crypto from 'node:crypto';
 import { env } from '../env.js';
 import { writerPool } from './db.js';
-import { verifyTransactionWithFlutterwave } from './flutterwave.js';
+import { nairaToKobo, verifyTransactionWithFlutterwave } from './flutterwave.js';
 import { markSeatsSold, releaseSeats } from './holds.js';
 
+export interface TransactionDetails {
+  status: string;
+  amountKobo: number;
+  currency: string;
+  txRef: string;
+}
+
+export interface ExpectedPaymentDetails {
+  amountKobo: number;
+  txRef: string;
+}
+
+export interface MismatchCheckResult {
+  valid: boolean;
+  mismatchType?: 'status' | 'amount' | 'currency' | 'tx_ref';
+  reason?: string;
+}
+
+/**
+ * Validates verified transaction details against expected payment record (Task 2).
+ * Verifies status === 'successful', exact integer kobo amount, currency === 'NGN', and txRef.
+ */
+export function checkTransactionMismatch(
+  actual: TransactionDetails,
+  expected: ExpectedPaymentDetails
+): MismatchCheckResult {
+  if (actual.status !== 'successful') {
+    return {
+      valid: false,
+      mismatchType: 'status',
+      reason: `status mismatch: expected 'successful', got '${actual.status}'`,
+    };
+  }
+  if (actual.amountKobo !== expected.amountKobo) {
+    return {
+      valid: false,
+      mismatchType: 'amount',
+      reason: `amount mismatch: expected ${expected.amountKobo} kobo, got ${actual.amountKobo} kobo`,
+    };
+  }
+  if (actual.currency !== 'NGN') {
+    return {
+      valid: false,
+      mismatchType: 'currency',
+      reason: `currency mismatch: expected 'NGN', got '${actual.currency}'`,
+    };
+  }
+  if (actual.txRef !== expected.txRef) {
+    return {
+      valid: false,
+      mismatchType: 'tx_ref',
+      reason: `tx_ref mismatch: expected '${expected.txRef}', got '${actual.txRef}'`,
+    };
+  }
+  return { valid: true };
+}
+
 export interface ProcessWebhookResult {
-  status: 'confirmed' | 'refunded_late_race' | 'failed' | 'ignored';
+  status: 'confirmed' | 'refunded_late_race' | 'failed' | 'ignored' | 'flagged';
   bookingIds?: string[];
   refundId?: string;
-  message: string;
+  message?: string;
+  paymentId?: string;
+  reason?: string;
+  mismatchType?: string;
 }
 
 /**
@@ -80,50 +140,25 @@ export async function processWebhookEvent(eventId: string): Promise<ProcessWebho
 
     const payment = paymentRes.rows[0];
 
-    // Handle failed / cancelled payment
-    if (fwStatus !== 'successful') {
-      await client.query(
-        `UPDATE payments SET status = 'failed' WHERE id = $1`,
-        [payment.id]
-      );
-      await client.query(
-        `UPDATE webhook_events SET status = 'processed' WHERE id = $1`,
-        [event.id]
-      );
-      await client.query('COMMIT');
-      return { status: 'failed', message: 'Payment reported as failed by provider' };
-    }
+    // Verification & Mismatch check (Task 2):
+    // Status, amount, currency, or tx_ref mismatch must NOT insert a ledger row of a type the CHECK forbids.
+    // Instead mark the payment 'flagged', create no booking, confirm no seats, let hold expire naturally,
+    // log ONLY payment id and reason (no secrets, no personal data), and return 200.
+    let verifiedDetails: TransactionDetails;
 
-    // Task 3b: Re-query through Flutterwave's Verify transaction endpoint
-    // Skip ONLY under PAYMENT_SIMULATOR (never in production)
     if (!env.PAYMENT_SIMULATOR) {
       try {
         const transactionId = payload?.data?.id || txRef;
         const verified = await verifyTransactionWithFlutterwave(transactionId);
-
-        const statusMatch = verified.status === 'successful';
-        const amountMatch = verified.amountKobo === Number(payment.amount_kobo);
-        const currencyMatch = verified.currency === 'NGN';
-        const txRefMatch = verified.txRef === txRef;
-
-        if (!statusMatch || !amountMatch || !currencyMatch || !txRefMatch) {
-          process.stderr.write(
-            `[Payment Mismatch] Payment discrepancy detected. Status: ${verified.status}, Currency: ${verified.currency}. Marking flagged.\n`
-          );
-          await client.query(
-            `UPDATE payments SET status = 'flagged' WHERE id = $1`,
-            [payment.id]
-          );
-          await client.query(
-            `UPDATE webhook_events SET status = 'processed' WHERE id = $1`,
-            [event.id]
-          );
-          await client.query('COMMIT');
-          return { status: 'failed', message: 'Payment verification discrepancy flagged' };
-        }
+        verifiedDetails = {
+          status: verified.status,
+          amountKobo: verified.amountKobo,
+          currency: verified.currency,
+          txRef: verified.txRef,
+        };
       } catch (err: any) {
         process.stderr.write(
-          `[Payment Verify Error] Verification re-query failed: ${err.message}\n`
+          `[Payment Verify Error] Payment ID ${payment.id}: Verification re-query failed: ${err.message}\n`
         );
         await client.query(
           `UPDATE payments SET status = 'flagged' WHERE id = $1`,
@@ -134,8 +169,48 @@ export async function processWebhookEvent(eventId: string): Promise<ProcessWebho
           [event.id]
         );
         await client.query('COMMIT');
-        return { status: 'failed', message: 'Payment verification failed' };
+        return { status: 'flagged', paymentId: payment.id, message: 'Payment verification failed' };
       }
+    } else {
+      verifiedDetails = {
+        status: fwStatus || 'successful',
+        amountKobo: payload?.data?.amount ? nairaToKobo(payload.data.amount) : Number(payment.amount_kobo),
+        currency: payload?.data?.currency || 'NGN',
+        txRef: txRef,
+      };
+    }
+
+    const mismatch = checkTransactionMismatch(verifiedDetails, {
+      amountKobo: Number(payment.amount_kobo),
+      txRef: payment.idempotency_key || txRef,
+    });
+
+    if (!mismatch.valid) {
+      // Log ONLY payment id and reason (no secrets, no personal data) (Task 2)
+      process.stderr.write(
+        `[Payment Discrepancy Flagged] Payment ID ${payment.id}: ${mismatch.reason}\n`
+      );
+
+      // Mark payment 'flagged' (do NOT mark possibly-paid payment 'failed')
+      await client.query(
+        `UPDATE payments SET status = 'flagged' WHERE id = $1`,
+        [payment.id]
+      );
+
+      // Create no booking, confirm no seats, let hold expire naturally, insert NO ledger rows
+      await client.query(
+        `UPDATE webhook_events SET status = 'processed' WHERE id = $1`,
+        [event.id]
+      );
+      await client.query('COMMIT');
+
+      return {
+        status: 'flagged',
+        paymentId: payment.id,
+        reason: mismatch.reason,
+        mismatchType: mismatch.mismatchType,
+        message: 'Payment verification discrepancy flagged. No booking created.',
+      };
     }
 
     // 3. Extract seatIds and showtimeId from payment idempotency key or metadata
@@ -423,7 +498,7 @@ export async function cancelShowtimeAndRefund(showtimeId: string): Promise<{
 
     // Release Redis hold/sold markers
     if (seatIdsToRelease.length > 0) {
-      await releaseSeats(showtimeId, seatIdsToRelease, 'system').catch(() => {});
+      await releaseSeats(showtimeId, seatIdsToRelease, 'system').catch(() => { });
     }
 
     return {

@@ -4,7 +4,7 @@ import { writerPool } from '../lib/db.js';
 import { getSeatMap, holdSeats, releaseSeats } from '../lib/holds.js';
 import { cancelShowtimeAndRefund } from '../lib/jobs.js';
 import { holdRateLimit, searchRateLimit } from '../lib/rateLimit.js';
-import { getSessionUser } from '../lib/session.js';
+import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 import { getWaitingRoomStatus, isAdmittedOrRoomInactive } from '../lib/waitingRoom.js';
 import { holdSeatsBodySchema, releaseHoldsBodySchema } from '../schemas/cinema.js';
 
@@ -58,14 +58,17 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const allowed = await searchRateLimit(request, reply, user.id);
@@ -104,14 +107,17 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const { id: showtimeId } = request.params as { id: string };
@@ -129,14 +135,17 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const allowed = await holdRateLimit(request, reply, user.id);
@@ -208,14 +217,17 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     const { id: showtimeId } = request.params as { id: string };
@@ -248,14 +260,17 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
     let user;
     try {
       user = await getSessionUser(request);
-    } catch {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required.',
-          requestId: request.id,
-        },
-      });
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
     }
 
     // Task 5: Admin authorization guard

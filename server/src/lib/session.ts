@@ -4,6 +4,13 @@ import { query } from './db.js';
 import { hashArgon2id, verifyArgon2id } from './argon2.js';
 import { env } from '../env.js';
 
+export class UnauthorizedError extends Error {
+  constructor(message = 'Unauthorized') {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}
+
 export interface AuthenticatedUser {
   id: string;
   email: string;
@@ -120,13 +127,13 @@ export async function revokeAllUserSessions(userId: string): Promise<void> {
 export async function getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser> {
   const authHeader = request.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new Error('Unauthorized');
+    throw new UnauthorizedError('Unauthorized');
   }
 
   const rawToken = authHeader.slice(7).trim();
   const parsed = parseToken(rawToken);
   if (!parsed) {
-    throw new Error('Unauthorized');
+    throw new UnauthorizedError('Unauthorized');
   }
 
   const { publicId, secret } = parsed;
@@ -138,11 +145,11 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
     // Check timeouts
     if (now > cached.expiresAt || now - cached.lastActiveAt > IDLE_TIMEOUT_MS) {
       await revokeSession(publicId);
-      throw new Error('Unauthorized');
+      throw new UnauthorizedError('Unauthorized');
     }
     if (cached.userStatus !== 'active') {
       await revokeSession(publicId);
-      throw new Error('Unauthorized');
+      throw new UnauthorizedError('Unauthorized');
     }
     // Update last active
     cached.lastActiveAt = now;
@@ -172,7 +179,7 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
   const row = result.rows[0];
   if (!row) {
     verifiedSessionCache.delete(publicId);
-    throw new Error('Unauthorized');
+    throw new UnauthorizedError('Unauthorized');
   }
 
   // 3. Verify absolute expiry and idle expiry
@@ -181,14 +188,14 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
 
   if (now > expiresAtMs || now - lastActiveMs > IDLE_TIMEOUT_MS || row.status !== 'active') {
     await revokeSession(publicId);
-    throw new Error('Unauthorized');
+    throw new UnauthorizedError('Unauthorized');
   }
 
   // 4. Verify secret hash with Argon2id
   const isSecretValid = await verifyArgon2id(row.secret_hash, secret);
   if (!isSecretValid) {
     await revokeSession(publicId);
-    throw new Error('Unauthorized');
+    throw new UnauthorizedError('Unauthorized');
   }
 
   // 5. Update last_active_at in DB
