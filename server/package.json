@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --include \"src/__tests__/**/*.integration.test.ts\"",
-    "seed:loadtest-sessions": "tsx scripts/loadtest-sessions.ts"
+    "seed:loadtest-sessions": "tsx scripts/loadtest-sessions.ts",
+    "seed:cinema": "tsx scripts/seed-cinema.ts"
   },
   "dependencies": {
     "argon2": "^0.40.3",
