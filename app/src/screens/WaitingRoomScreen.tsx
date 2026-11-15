@@ -26,7 +26,6 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
   const { colors, spacing, typography, radius } = useTheme();
 
   const [position, setPosition] = useState<number | undefined>(undefined);
-  const [estimatedWaitSeconds, setEstimatedWaitSeconds] = useState<number | undefined>(undefined);
   const [isAdmitted, setIsAdmitted] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -47,7 +46,6 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
         }
 
         setPosition(data.position);
-        setEstimatedWaitSeconds(data.estimatedWaitSeconds);
       } catch (err: any) {
         if (!isMountedRef.current) return;
         setErrorMessage(err.message || STRINGS.common.genericError);
@@ -89,6 +87,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
         <Text
           allowFontScaling
           accessibilityRole="header"
+          accessibilityLabel={isAdmitted ? STRINGS.waitingRoom.admittedMessage : STRINGS.waitingRoom.title}
           style={[
             styles.titleText,
             {
@@ -104,6 +103,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
 
         <Text
           allowFontScaling
+          accessibilityLabel={STRINGS.waitingRoom.subtitle}
           style={[
             styles.subtitleText,
             {
@@ -131,6 +131,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           >
             <Text
               allowFontScaling
+              accessibilityLabel={STRINGS.waitingRoom.rankLabel}
               style={[
                 styles.statLabel,
                 {
@@ -144,6 +145,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
             </Text>
             <Text
               allowFontScaling
+              accessibilityLabel={`${STRINGS.waitingRoom.rankLabel}: ${position}`}
               style={[
                 styles.statValue,
                 {
@@ -160,27 +162,27 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           </View>
         )}
 
-        {estimatedWaitSeconds !== undefined && (
-          <Text
-            allowFontScaling
-            style={[
-              styles.estimatedText,
-              {
-                color: colors.on_surface_variant,
-                fontFamily: typography.bodySmall.fontFamily,
-                fontSize: typography.bodySmall.fontSize,
-                marginTop: spacing.md,
-              },
-            ]}
-          >
-            {STRINGS.waitingRoom.estimatedWaitLabel}: {STRINGS.waitingRoom.secondsRemaining(estimatedWaitSeconds)}
-          </Text>
-        )}
+        <Text
+          allowFontScaling
+          accessibilityLabel={STRINGS.waitingRoom.spotOpensMessage}
+          style={[
+            styles.calmNoticeText,
+            {
+              color: colors.on_surface_variant,
+              fontFamily: typography.bodySmall.fontFamily,
+              fontSize: typography.bodySmall.fontSize,
+              marginTop: spacing.md,
+            },
+          ]}
+        >
+          {STRINGS.waitingRoom.spotOpensMessage}
+        </Text>
 
         {errorMessage && (
           <Text
             allowFontScaling
             accessibilityRole="alert"
+            accessibilityLabel={errorMessage}
             style={[
               styles.errorText,
               {
@@ -225,7 +227,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {},
   statValue: {},
-  estimatedText: {
+  calmNoticeText: {
     textAlign: 'center',
   },
   errorText: {

@@ -189,7 +189,8 @@ export const STRINGS = {
     rankLabel: 'Your position in line',
     estimatedWaitLabel: 'Estimated wait time',
     admittedMessage: 'You are admitted! Securing your seats now…',
-    secondsRemaining: (s: number) => `~${s} seconds`,
+    spotOpensMessage: 'We will let you in as soon as a spot opens.',
+    secondsRemaining: (s: number) => (s === 1 ? '~1 second' : `~${s} seconds`),
   },
 
   checkout: {

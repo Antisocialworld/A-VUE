@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { STRINGS } from '../constants/strings';
 import {
   MAX_SEATS_PER_BOOKING,
   checkoutBodySchema,
@@ -204,6 +205,30 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
         );
         expect(matches).toEqual([]);
       }
+    });
+  });
+
+  // 7. Waiting Room Calm Messaging & Wait Estimate Contract (Task A & B)
+  describe('Waiting Room Calm Messaging and Wait Estimate Contract (Task A & B)', () => {
+    it('verifies secondsRemaining singular and plural formatting', () => {
+      expect(STRINGS.waitingRoom.secondsRemaining(1)).toBe('~1 second');
+      expect(STRINGS.waitingRoom.secondsRemaining(2)).toBe('~2 seconds');
+      expect(STRINGS.waitingRoom.secondsRemaining(45)).toBe('~45 seconds');
+    });
+
+    it('verifies WaitingRoomScreen displays calm line and excludes misleading seconds estimate', () => {
+      const waitingRoomSrc = fs.readFileSync(
+        path.resolve(__dirname, '../screens/WaitingRoomScreen.tsx'),
+        'utf-8'
+      );
+      expect(STRINGS.waitingRoom.spotOpensMessage).toBe(
+        'We will let you in as soon as a spot opens.'
+      );
+      expect(waitingRoomSrc).toContain('STRINGS.waitingRoom.spotOpensMessage');
+      expect(waitingRoomSrc).not.toContain('STRINGS.waitingRoom.secondsRemaining');
+      expect(waitingRoomSrc).not.toContain('estimatedWaitSeconds');
+      expect(waitingRoomSrc).toContain('#{position}');
+      expect(waitingRoomSrc).toContain('accessibilityLabel={STRINGS.waitingRoom.spotOpensMessage}');
     });
   });
 });
