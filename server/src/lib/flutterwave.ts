@@ -22,6 +22,22 @@ export interface CreatePaymentLinkResult {
   isSimulated: boolean;
 }
 
+/**
+ * Computes whether Flutterwave is operating in test mode based on key prefix.
+ * Test keys start with 'FLWSECK_TEST-'. Live keys start with 'FLWSECK-'.
+ * Never logs, prints, or returns any secret key (Rule 02 / Task 3).
+ */
+export function isFlutterwaveTestMode(): boolean {
+  if (env.PAYMENT_SIMULATOR) {
+    return true;
+  }
+  const secretKey = env.FLUTTERWAVE_SECRET_KEY || '';
+  if (!secretKey || secretKey.trim().length === 0) {
+    return true; // Safe fallback when no key is set
+  }
+  return secretKey.startsWith('FLWSECK_TEST');
+}
+
 export interface FlutterwaveVerifiedTransaction {
   status: string; // 'successful'
   amountKobo: number; // Converted from Naira to kobo via integer arithmetic

@@ -1,13 +1,16 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  deleteAccountSchema,
   requestResetSchema,
   resetPasswordSchema,
   resendCodeSchema,
+  restoreAccountSchema,
   signInSchema,
   signUpSchema,
   verifyCodeSchema,
 } from '../schemas/auth.js';
-import { query } from '../lib/db.js';
+import { env } from '../env.js';
+import { query, writerPool } from '../lib/db.js';
 import { hashArgon2id, verifyArgon2id } from '../lib/argon2.js';
 import {
   createSession,
@@ -20,7 +23,8 @@ import {
 import { dispatchAuthCode, verifyAuthCode } from '../lib/code.js';
 import { authRateLimit } from '../lib/rateLimit.js';
 import { getRedisClient } from '../lib/redis.js';
-import { sendAccountExistsNoticeEmail } from '../lib/mailer.js';
+import { sendAccountDeletionNoticeEmail, sendAccountExistsNoticeEmail } from '../lib/mailer.js';
+import { releaseAllUserHolds } from '../lib/holds.js';
 import { consumeEmailSendSlot } from '../lib/sendCap.js';
 
 // Pre-computed dummy hash generated once at startup for constant-time dummy verification (Task 9)
@@ -160,7 +164,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       email: string;
       password_hash: string | null;
       status: 'active' | 'locked';
-    }>('SELECT id, email, password_hash, status FROM users WHERE email = $1;', [email]);
+      deleted_at: Date | string | null;
+      purge_after: Date | string | null;
+    }>('SELECT id, email, password_hash, status, deleted_at, purge_after FROM users WHERE email = $1;', [email]);
 
     const user = result.rows[0];
 
@@ -183,6 +189,28 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         error: {
           code: 'INVALID_CREDENTIALS',
           message: 'Invalid email or password. Please try again.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    // Account scheduled for deletion: verified password required before exposing status (Task 4)
+    if (user.deleted_at) {
+      const purgeDate = user.purge_after ? new Date(user.purge_after) : null;
+      if (purgeDate && purgeDate.getTime() <= Date.now()) {
+        return reply.status(401).send({
+          error: {
+            code: 'INVALID_CREDENTIALS',
+            message: 'Invalid email or password. Please try again.',
+            requestId: request.id,
+          },
+        });
+      }
+      return reply.status(403).send({
+        error: {
+          code: 'ACCOUNT_SCHEDULED_FOR_DELETION',
+          message: 'This account is scheduled for deletion.',
+          purgeAfter: purgeDate ? purgeDate.toISOString() : new Date().toISOString(),
           requestId: request.id,
         },
       });
@@ -276,5 +304,192 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/auth/me', async (request: FastifyRequest, reply: FastifyReply) => {
     const user = await getSessionUser(request);
     return reply.status(200).send({ user });
+  });
+
+  // 9. Account Delete (Task 4: Schedules account deletion with grace period)
+  fastify.post('/auth/delete', async (request: FastifyRequest, reply: FastifyReply) => {
+    let sessionUser;
+    try {
+      sessionUser = await getSessionUser(request);
+    } catch {
+      return reply.status(401).send({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required to delete account.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    const data = deleteAccountSchema.parse(request.body);
+
+    // Fetch user password_hash
+    const userRes = await query<{ id: string; email: string; password_hash: string | null }>(
+      'SELECT id, email, password_hash FROM users WHERE id = $1;',
+      [sessionUser.id]
+    );
+    const user = userRes.rows[0];
+    if (!user || !user.password_hash) {
+      return reply.status(401).send({
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Incorrect password. Account deletion cancelled.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    const isMatch = await verifyArgon2id(user.password_hash, data.password);
+    if (!isMatch) {
+      return reply.status(401).send({
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Incorrect password. Account deletion cancelled.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    // Check for paid active tickets on upcoming showtimes
+    const activeTicketsRes = await query<{ count: string }>(
+      `SELECT COUNT(*)::text as count
+       FROM tickets t
+       JOIN bookings b ON b.id = t.booking_id
+       JOIN showtimes s ON s.id = b.showtime_id
+       WHERE t.user_id = $1
+         AND t.status = 'active'
+         AND s.starts_at > NOW();`,
+      [user.id]
+    );
+
+    if (Number(activeTicketsRes.rows[0]?.count || 0) > 0) {
+      return reply.status(409).send({
+        error: {
+          code: 'HAS_UPCOMING_TICKETS',
+          message: 'Cannot delete account with upcoming tickets. Please wait until your showtime has passed or cancel your tickets.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    // ONE database transaction
+    const pool = writerPool;
+    const client = await pool.connect();
+    const graceDays = env.DELETION_GRACE_DAYS;
+    let purgeDateIso: string;
+
+    try {
+      await client.query('BEGIN');
+
+      const updateRes = await client.query<{ purge_after: Date }>(
+        `UPDATE users
+         SET deleted_at = NOW(),
+             purge_after = NOW() + ($1 || ' days')::INTERVAL,
+             updated_at = NOW()
+         WHERE id = $2
+         RETURNING purge_after;`,
+        [graceDays, user.id]
+      );
+      purgeDateIso = new Date(updateRes.rows[0].purge_after).toISOString();
+
+      // Hard delete user sessions and auth codes
+      await client.query('DELETE FROM sessions WHERE user_id = $1;', [user.id]);
+      await client.query('DELETE FROM auth_codes WHERE email = $1;', [user.email]);
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Revoke cached sessions and release seat holds
+    await revokeAllUserSessions(user.id);
+    await releaseAllUserHolds(user.id);
+
+    // Send confirmation email
+    const formattedPurgeDate = new Date(purgeDateIso).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    await sendAccountDeletionNoticeEmail(user.email, formattedPurgeDate);
+
+    return reply.status(200).send({
+      message: 'Account scheduled for deletion.',
+      purgeAfter: purgeDateIso,
+    });
+  });
+
+  // 10. Account Restore (Task 4: Cancels scheduled deletion and restores account)
+  fastify.post('/auth/restore', async (request: FastifyRequest, reply: FastifyReply) => {
+    const data = restoreAccountSchema.parse(request.body);
+    const email = data.email.toLowerCase().trim();
+
+    const result = await query<{
+      id: string;
+      email: string;
+      password_hash: string | null;
+      status: 'active' | 'locked';
+      deleted_at: Date | string | null;
+      purge_after: Date | string | null;
+    }>(
+      'SELECT id, email, password_hash, status, deleted_at, purge_after FROM users WHERE email = $1;',
+      [email]
+    );
+
+    const user = result.rows[0];
+
+    // Check existence, deletion status, and expiry of grace period
+    if (
+      !user ||
+      !user.password_hash ||
+      !user.deleted_at ||
+      (user.purge_after && new Date(user.purge_after).getTime() <= Date.now())
+    ) {
+      const dummy = await getDummyHash();
+      await verifyArgon2id(dummy, data.password);
+      return reply.status(401).send({
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password. Please try again.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    const isMatch = await verifyArgon2id(user.password_hash, data.password);
+    if (!isMatch) {
+      return reply.status(401).send({
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password. Please try again.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    // Clear deletion timestamps and restore
+    await query(
+      `UPDATE users
+       SET deleted_at = NULL,
+           purge_after = NULL,
+           status = 'active',
+           updated_at = NOW()
+       WHERE id = $1;`,
+      [user.id]
+    );
+
+    const token = await createSession(user.id);
+
+    return reply.status(200).send({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        status: 'active',
+      },
+    });
   });
 }

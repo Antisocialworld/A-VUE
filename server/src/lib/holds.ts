@@ -335,6 +335,32 @@ export async function verifyUserHolds(
 }
 
 /**
+ * Releases ALL seats held by this user across any active showtime.
+ * Used during account deletion (Task 4) and session teardown.
+ */
+export async function releaseAllUserHolds(userId: string): Promise<number> {
+  const redis = getRedisClient();
+  try {
+    if (redis.status !== 'ready') {
+      await redis.connect().catch(() => {});
+    }
+    const keys = await redis.keys('hold:*');
+    if (keys.length === 0) return 0;
+
+    const released = (await redis.eval(
+      RELEASE_SEATS_LUA,
+      keys.length,
+      ...keys,
+      userId
+    )) as number;
+    return released;
+  } catch (err: any) {
+    process.stderr.write(`[Hold Error] Failed to release all user holds: ${err.message}\n`);
+    return 0;
+  }
+}
+
+/**
  * Writes permanent sold markers in Redis (no TTL) and removes temporary holds.
  * (Rule 04: "On payment, write a permanent sold marker before removing the hold key")
  */

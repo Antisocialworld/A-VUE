@@ -174,6 +174,36 @@ export async function sendAccountExistsNoticeEmail(toEmail: string): Promise<Sen
 }
 
 /**
+ * Account deletion scheduled notice email.
+ * Sent when user schedules account deletion (Task 4).
+ * States scheduled purge date and that logging in before that date restores account.
+ * Never includes tokens, passwords, or secrets.
+ */
+export async function sendAccountDeletionNoticeEmail(
+  toEmail: string,
+  purgeDateStr: string
+): Promise<SendMailResult> {
+  const mailOptions: nodemailer.SendMailOptions = {
+    from: env.MAIL_FROM,
+    to: toEmail,
+    subject: 'A VUE — Account Scheduled for Deletion',
+    text: `Your A VUE account has been scheduled for permanent deletion on ${purgeDateStr}.\n\nIf you change your mind before this date, simply logging in to your account will immediately restore it.\n\nAfter this date, personal account details will be permanently anonymised.\n\nA view. Your view. Our view.`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #FFE7DF; border-radius: 12px; background: #FFF4F1;">
+        <h2 style="color: #FD550A; margin-top: 0;">A VUE</h2>
+        <p style="color: #231917; font-size: 16px; font-weight: bold;">Account Scheduled for Deletion</p>
+        <p style="color: #53433F; font-size: 14px;">Your A VUE account has been scheduled for permanent deletion on <strong>${purgeDateStr}</strong>.</p>
+        <p style="color: #53433F; font-size: 14px;">If you change your mind before this date, simply logging in to your account will immediately restore it.</p>
+        <p style="color: #53433F; font-size: 14px;">After this date, your personal details will be permanently anonymised.</p>
+        <p style="color: #85736E; font-size: 12px; margin-bottom: 0;">A view. Your view. Our view.</p>
+      </div>
+    `,
+  };
+
+  return sendMailSafely(mailOptions);
+}
+
+/**
  * Task 2: Smoke test email.
  * Sends a fixed test message through the same transporter to the specified recipient.
  * Recipient comes from MAIL_TEST_TO. If missing, refuses to send.

@@ -97,3 +97,23 @@ export const resetPasswordSchema = z
 
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+// 7. Delete Account Schema (Task 4)
+export const deleteAccountSchema = z
+  .object({
+    password: signInPasswordSchema,
+    confirm: z.literal('DELETE'),
+  })
+  .strict();
+
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
+
+// 8. Restore Account Schema (Task 4)
+export const restoreAccountSchema = z
+  .object({
+    email: emailSchema,
+    password: signInPasswordSchema,
+  })
+  .strict();
+
+export type RestoreAccountInput = z.infer<typeof restoreAccountSchema>;
+

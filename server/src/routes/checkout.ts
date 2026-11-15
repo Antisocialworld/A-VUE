@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from '../env.js';
 import { writerPool } from '../lib/db.js';
-import { createFlutterwavePaymentLink } from '../lib/flutterwave.js';
+import { createFlutterwavePaymentLink, isFlutterwaveTestMode } from '../lib/flutterwave.js';
 import { verifyUserHolds } from '../lib/holds.js';
 import { processWebhookEvent } from '../lib/jobs.js';
 import { checkoutRateLimit } from '../lib/rateLimit.js';
@@ -9,6 +9,17 @@ import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 import { checkoutBodySchema } from '../schemas/cinema.js';
 
 export async function checkoutRoutes(fastify: FastifyInstance) {
+  /**
+   * GET /checkout/config
+   * Minimal public config endpoint returning testMode boolean.
+   * Safe: returns only boolean flag, never credentials or keys (Rule 02 / Task 3).
+   */
+  fastify.get('/checkout/config', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.status(200).send({
+      testMode: isFlutterwaveTestMode(),
+    });
+  });
+
   /**
    * POST /checkout
    * Initiates payment for held seats with mandatory Idempotency-Key.
@@ -85,6 +96,7 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
         currency: 'NGN',
         paymentLink: linkRes.paymentLink,
         isSimulated: linkRes.isSimulated,
+        testMode: isFlutterwaveTestMode(),
       });
     }
 
@@ -181,6 +193,7 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
         currency: 'NGN',
         paymentLink: linkResult.paymentLink,
         isSimulated: linkResult.isSimulated,
+        testMode: isFlutterwaveTestMode(),
       });
     } catch (err: any) {
       await client.query('ROLLBACK');

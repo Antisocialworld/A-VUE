@@ -50,6 +50,7 @@ const envSchema = z.object({
   CODE_RESEND_COOLDOWN_SECONDS: z.coerce.number().default(60),
   MAX_CODE_ATTEMPTS: z.coerce.number().default(5),
   DAILY_CODE_SEND_CAP: z.coerce.number().default(5),
+  DELETION_GRACE_DAYS: z.coerce.number().int().min(1).max(90).default(30),
 
   // Traffic Constants
   HOLD_TTL_SECONDS: z.coerce.number().default(600),
