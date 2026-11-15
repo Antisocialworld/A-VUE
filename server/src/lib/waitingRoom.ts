@@ -1,7 +1,7 @@
 /**
  * A VUE Waiting Room Module
- * Implements serverless lazy queue admission when concurrent users exceed WAITING_ROOM_ACTIVE_LIMIT.
- * (Rule 04 / Task 5)
+ * Implements serverless atomic queue admission and capacity control via Redis Lua script.
+ * (Rule 04 / Task 5 & Waiting Room Hardening)
  */
 
 import crypto from 'node:crypto';
@@ -16,10 +16,92 @@ export interface WaitingRoomStatus {
 }
 
 /**
- * Checks the user's status in the showtime waiting room.
- * Admits user if active limit is not exceeded, or returns queue position.
+ * Single atomic check-in Lua script.
+ * KEYS[1]: wr:<showtimeId>:active (Hash mapping userId -> timestampMs)
+ * KEYS[2]: wr:<showtimeId>:queue (Sorted Set mapping userId -> score timestampMs)
+ * ARGV[1]: userId
+ * ARGV[2]: now (timestampMs)
+ * ARGV[3]: activeLimit
+ * ARGV[4]: slotSeconds
  */
-export async function getWaitingRoomStatus(
+const CHECK_IN_LUA = `
+local activeKey = KEYS[1]
+local queueKey = KEYS[2]
+
+local userId = ARGV[1]
+local now = tonumber(ARGV[2])
+local activeLimit = tonumber(ARGV[3])
+local slotSeconds = tonumber(ARGV[4])
+local slotMs = slotSeconds * 1000
+local cutoff = now - slotMs
+
+-- 1. If userId is in the active hash and not stale, refresh its timestamp and return admitted.
+local existingActive = redis.call("HGET", activeKey, userId)
+if existingActive then
+  local ts = tonumber(existingActive)
+  if ts and ts >= cutoff then
+    redis.call("HSET", activeKey, userId, now)
+    return { "admitted", 0 }
+  end
+end
+
+-- 2. Remove stale active entries (older than slotSeconds).
+local allActive = redis.call("HGETALL", activeKey)
+for i = 1, #allActive, 2 do
+  local uid = allActive[i]
+  local ts = tonumber(allActive[i + 1])
+  if ts and ts < cutoff then
+    redis.call("HDEL", activeKey, uid)
+  end
+end
+
+local activeCount = redis.call("HLEN", activeKey)
+
+-- 3. Admit from the FRONT of the queue (lowest score) into the active hash, up to the free slots.
+local freeSlots = activeLimit - activeCount
+local admittedInStep3 = false
+
+if freeSlots > 0 then
+  local candidates = redis.call("ZRANGE", queueKey, 0, freeSlots - 1)
+  if #candidates > 0 then
+    for _, cand in ipairs(candidates) do
+      redis.call("ZREM", queueKey, cand)
+      redis.call("HSET", activeKey, cand, now)
+      if cand == userId then
+        admittedInStep3 = true
+      end
+    end
+    activeCount = activeCount + #candidates
+  end
+end
+
+-- 4. If the caller was admitted in step 3, return admitted.
+if admittedInStep3 then
+  return { "admitted", 0 }
+end
+
+-- 5. If the caller is not queued, active count < limit and the queue is empty, add the caller to active and return admitted.
+local callerRank = redis.call("ZRANK", queueKey, userId)
+local queueLength = redis.call("ZCARD", queueKey)
+
+if callerRank == false and activeCount < activeLimit and queueLength == 0 then
+  redis.call("HSET", activeKey, userId, now)
+  return { "admitted", 0 }
+end
+
+-- 6. Otherwise ZADD NX the caller to the queue and return queued with position (rank + 1).
+redis.call("ZADD", queueKey, "NX", now, userId)
+local rank = redis.call("ZRANK", queueKey, userId)
+local position = (rank and (rank + 1)) or 1
+return { "queued", position }
+`;
+
+/**
+ * Atomic check-in for waiting room admission.
+ * Runs single EVAL script that manages active pool and queue.
+ * Membership in active hash is the single source of truth for admission.
+ */
+export async function checkInWaitingRoom(
   showtimeId: string,
   userId: string
 ): Promise<WaitingRoomStatus> {
@@ -29,87 +111,33 @@ export async function getWaitingRoomStatus(
   }
 
   const now = Date.now();
-  const activeLimit = env.WAITING_ROOM_ACTIVE_LIMIT; // default 100
-  const admitPerSec = env.WAITING_ROOM_ADMIT_PER_SEC; // default 5
-  const slotSeconds = env.WAITING_ROOM_SLOT_SECONDS; // default 90s
+  const activeLimit = env.WAITING_ROOM_ACTIVE_LIMIT;
+  const slotSeconds = env.WAITING_ROOM_SLOT_SECONDS;
 
   const activeKey = `wr:${showtimeId}:active`;
   const queueKey = `wr:${showtimeId}:queue`;
-  const passKey = `wr:${showtimeId}:pass:${userId}`;
 
-  // 1. Check if user already holds a valid unexpired admission pass
-  const existingPass = await redis.get(passKey);
-  if (existingPass) {
-    // Refresh activity in active set
-    await redis.hset(activeKey, userId, String(now));
-    return {
-      status: 'admitted',
-      pass: existingPass,
-    };
-  }
+  const [status, position] = (await redis.eval(
+    CHECK_IN_LUA,
+    2,
+    activeKey,
+    queueKey,
+    userId,
+    String(now),
+    String(activeLimit),
+    String(slotSeconds)
+  )) as [string, number];
 
-  // 2. Clean stale users from active set (> slotSeconds old)
-  const activeEntries = await redis.hgetall(activeKey);
-  const cutoff = now - slotSeconds * 1000;
-  const staleUserIds: string[] = [];
-
-  for (const [uid, timestampStr] of Object.entries(activeEntries)) {
-    if (Number(timestampStr) < cutoff) {
-      staleUserIds.push(uid);
-    }
-  }
-
-  if (staleUserIds.length > 0) {
-    await redis.hdel(activeKey, ...staleUserIds);
-  }
-
-  const currentActiveCount = Object.keys(activeEntries).length - staleUserIds.length;
-
-  // 3. Process lazy admission from queue if capacity is available
-  const availableSlots = Math.max(0, activeLimit - currentActiveCount);
-  if (availableSlots > 0) {
-    // Pop top candidates from sorted set
-    const candidates = await redis.zrange(queueKey, 0, availableSlots - 1);
-    if (candidates.length > 0) {
-      const pipe = redis.pipeline();
-      pipe.zrem(queueKey, ...candidates);
-      for (const candidate of candidates) {
-        const pass = crypto.randomBytes(16).toString('hex');
-        pipe.hset(activeKey, candidate, String(now));
-        pipe.set(`wr:${showtimeId}:pass:${candidate}`, pass, 'EX', slotSeconds);
-      }
-      await pipe.exec();
-
-      // If our current user was in the admitted candidates
-      if (candidates.includes(userId)) {
-        const freshPass = await redis.get(passKey);
-        return {
-          status: 'admitted',
-          pass: freshPass || undefined,
-        };
-      }
-    }
-  }
-
-  // 4. If current active count is still under active limit and queue is empty, admit immediately
-  const queueLength = await redis.zcard(queueKey);
-  if (currentActiveCount < activeLimit && queueLength === 0) {
+  if (status === 'admitted') {
+    // Return opaque random token via crypto.randomBytes to preserve app contract (never stored, never checked)
     const pass = crypto.randomBytes(16).toString('hex');
-    const pipe = redis.pipeline();
-    pipe.hset(activeKey, userId, String(now));
-    pipe.set(passKey, pass, 'EX', slotSeconds);
-    await pipe.exec();
-
     return {
       status: 'admitted',
       pass,
     };
   }
 
-  // 5. User must queue: add to sorted set
-  await redis.zadd(queueKey, 'NX', now, userId);
-  const rank = await redis.zrank(queueKey, userId);
-  const position = rank !== null ? rank + 1 : 1;
+  const admitPerSec = env.WAITING_ROOM_ADMIT_PER_SEC;
   const estimatedWaitSeconds = Math.ceil(position / admitPerSec);
 
   return {
@@ -120,43 +148,12 @@ export async function getWaitingRoomStatus(
 }
 
 /**
- * Validates whether a user is authorized to hold seats.
- * Returns true if:
- * 1. The user holds a valid admission pass in Redis, OR
- * 2. The waiting room for this showtime is inactive (active users < limit and no queue).
+ * Checks the user's status in the showtime waiting room.
+ * Delegates to checkInWaitingRoom to avoid duplicate logic.
  */
-export async function isAdmittedOrRoomInactive(
+export async function getWaitingRoomStatus(
   showtimeId: string,
-  userId: string,
-  presentedPass?: string
-): Promise<boolean> {
-  const redis = getRedisClient();
-  try {
-    if (redis.status !== 'ready') {
-      await redis.connect().catch(() => {});
-    }
-
-    // Check pass
-    if (presentedPass) {
-      const storedPass = await redis.get(`wr:${showtimeId}:pass:${userId}`);
-      if (storedPass && storedPass === presentedPass) {
-        return true;
-      }
-    }
-
-    // Check if room has reached capacity
-    const activeCount = await redis.hlen(`wr:${showtimeId}:active`);
-    const queueCount = await redis.zcard(`wr:${showtimeId}:queue`);
-
-    if (activeCount < env.WAITING_ROOM_ACTIVE_LIMIT && queueCount === 0) {
-      return true; // Room inactive, direct hold allowed
-    }
-
-    return false;
-  } catch (err: any) {
-    process.stderr.write(`[WaitingRoom Warning] Redis offline during admission check: ${err.message}\n`);
-    // Fail closed: if Redis is down, waiting room fails closed
-    return false;
-  }
+  userId: string
+): Promise<WaitingRoomStatus> {
+  return checkInWaitingRoom(showtimeId, userId);
 }
-

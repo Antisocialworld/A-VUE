@@ -5,7 +5,7 @@ import { getSeatMap, holdSeats, releaseSeats } from '../lib/holds.js';
 import { cancelShowtimeAndRefund } from '../lib/jobs.js';
 import { holdRateLimit, searchRateLimit } from '../lib/rateLimit.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
-import { getWaitingRoomStatus, isAdmittedOrRoomInactive } from '../lib/waitingRoom.js';
+import { checkInWaitingRoom, getWaitingRoomStatus } from '../lib/waitingRoom.js';
 import { holdSeatsBodySchema, releaseHoldsBodySchema } from '../schemas/cinema.js';
 
 export async function showtimeRoutes(fastify: FastifyInstance) {
@@ -164,11 +164,22 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { seatIds, waitingRoomPass } = parsed.data;
+    const { seatIds } = parsed.data;
 
-    // Check waiting room admission
-    const isAdmitted = await isAdmittedOrRoomInactive(showtimeId, user.id, waitingRoomPass);
-    if (!isAdmitted) {
+    // Check waiting room admission via atomic check-in (Task B)
+    try {
+      const roomStatus = await checkInWaitingRoom(showtimeId, user.id);
+      if (roomStatus.status !== 'admitted') {
+        return reply.status(429).send({
+          error: {
+            code: 'WAITING_ROOM_REQUIRED',
+            message: 'High traffic. Please join the waiting room first.',
+            requestId: request.id,
+          },
+        });
+      }
+    } catch {
+      // Fail closed on Redis error
       return reply.status(429).send({
         error: {
           code: 'WAITING_ROOM_REQUIRED',
