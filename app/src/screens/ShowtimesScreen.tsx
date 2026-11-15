@@ -17,6 +17,13 @@ import { formatKoboToNaira } from '../utils/money';
 import { WORDMARK_BOX, WORDMARK_PATHS } from '../components/Wordmark';
 import colorData from '../tokens/color-tokens-orange-green-yellow.json';
 
+const CINEMA_CARD_PHOTOS = [
+  require('../../assets/photos/cinema-card-1.jpg'),
+  require('../../assets/photos/cinema-card-2.jpg'),
+  require('../../assets/photos/cinema-card-3.jpg'),
+  require('../../assets/photos/cinema-card-4.jpg'),
+];
+
 export interface ShowtimesScreenProps {
   movieId: number | string;
   movieTitle: string;
@@ -109,13 +116,20 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     });
   }, [showtimes, selectedDateStr]);
 
+  // Sorted unique cinema IDs for deterministic image assignment (Rule: modulo 4 on sorted index)
+  const sortedCinemaIds = useMemo(() => {
+    const ids = Array.from(new Set(showtimes.map((s) => s.cinemaId)));
+    return ids.sort((a, b) => a.localeCompare(b));
+  }, [showtimes]);
+
   // Group filtered showtimes by cinema
   const cinemaGroups = useMemo(() => {
-    const groups: Record<string, { cinemaName: string; city: string; items: ShowtimeItem[] }> = {};
+    const groups: Record<string, { cinemaId: string; cinemaName: string; city: string; items: ShowtimeItem[] }> = {};
 
     for (const item of filteredShowtimes) {
       if (!groups[item.cinemaId]) {
         groups[item.cinemaId] = {
+          cinemaId: item.cinemaId,
           cinemaName: item.cinemaName,
           city: item.city,
           items: [],
@@ -398,20 +412,66 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
           contentContainerStyle={[styles.scrollContent, { flexGrow: 1, paddingBottom: 0 }]}
         >
           <View style={{ padding: spacing.base }}>
-            {cinemaGroups.map((group) => (
-              <View
-                key={group.cinemaName}
-                style={[
-                  styles.cinemaCard,
-                  {
-                    backgroundColor: colors.surface_container_low,
-                    borderColor: colors.outline_variant,
-                    borderRadius: radius.md,
-                    padding: spacing.base,
-                    marginBottom: spacing.base,
-                  },
-                ]}
-              >
+            {cinemaGroups.map((group) => {
+              const cinemaIndex = sortedCinemaIds.indexOf(group.cinemaId);
+              const photoIndex = (cinemaIndex >= 0 ? cinemaIndex : 0) % 4;
+              const cardPhoto = CINEMA_CARD_PHOTOS[photoIndex];
+
+              return (
+                <View
+                  key={group.cinemaId || group.cinemaName}
+                  style={[
+                    styles.cinemaCard,
+                    {
+                      backgroundColor: colors.surface_container_low,
+                      borderColor: colors.outline_variant,
+                      borderRadius: radius.md,
+                      padding: spacing.base,
+                      marginBottom: spacing.base,
+                    },
+                  ]}
+                >
+                  {/* Decorative picture on the RIGHT behind text, feathered on all edges */}
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.cardPhotoContainer,
+                      {
+                        borderRadius: radius.sm,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={cardPhoto}
+                      pointerEvents="none"
+                      accessibilityRole="image"
+                      accessibilityLabel={STRINGS.showtimes.cinemaCardPhotoAccessibilityLabel}
+                      style={styles.cardPhotoImage}
+                    />
+                    <Svg
+                      style={StyleSheet.absoluteFill}
+                      width="100%"
+                      height="100%"
+                      pointerEvents="none"
+                    >
+                      <Defs>
+                        <LinearGradient id={`cardFadeH_${group.cinemaId}`} x1="0" y1="0" x2="1" y2="0">
+                          <Stop offset="0" stopColor={colors.surface_container_low} stopOpacity="1" />
+                          <Stop offset="0.6" stopColor={colors.surface_container_low} stopOpacity="0" />
+                          <Stop offset="0.9" stopColor={colors.surface_container_low} stopOpacity="0" />
+                          <Stop offset="1" stopColor={colors.surface_container_low} stopOpacity="0.8" />
+                        </LinearGradient>
+                        <LinearGradient id={`cardFadeV_${group.cinemaId}`} x1="0" y1="0" x2="0" y2="1">
+                          <Stop offset="0" stopColor={colors.surface_container_low} stopOpacity="0.8" />
+                          <Stop offset="0.2" stopColor={colors.surface_container_low} stopOpacity="0" />
+                          <Stop offset="0.8" stopColor={colors.surface_container_low} stopOpacity="0" />
+                          <Stop offset="1" stopColor={colors.surface_container_low} stopOpacity="0.8" />
+                        </LinearGradient>
+                      </Defs>
+                      <Rect width="100%" height="100%" fill={`url(#cardFadeH_${group.cinemaId})`} />
+                      <Rect width="100%" height="100%" fill={`url(#cardFadeV_${group.cinemaId})`} />
+                    </Svg>
+                  </View>
                 <Text
                   allowFontScaling
                   accessibilityRole="header"
@@ -521,7 +581,8 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
                   })}
                 </View>
               </View>
-            ))}
+            );
+          })}
           </View>
 
           {/* Footer Photo after last cinema card with top fade, dim overlay, and lettering watermark */}
@@ -654,6 +715,22 @@ const styles = StyleSheet.create({
   cinemaCard: {
     width: '100%',
     borderWidth: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  cardPhotoContainer: {
+    position: 'absolute',
+    right: 8,
+    top: '5%',
+    width: '40%',
+    height: '90%',
+    overflow: 'hidden',
+  },
+  cardPhotoImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.6,
+    resizeMode: 'cover',
   },
   cinemaName: {
     letterSpacing: -0.1,

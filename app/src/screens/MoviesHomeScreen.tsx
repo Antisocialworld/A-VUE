@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import {
+  AccountMenu,
   Button,
   EmptyState,
   MovieCard,
@@ -94,37 +95,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
           </Text>
         </Pressable>
       )}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={STRINGS.movies.signOutAction}
-        accessibilityHint={STRINGS.movies.signOutAccessibilityHint}
-        onPress={onSignOut}
-        style={({ pressed }) => [
-          styles.signOutPill,
-          {
-            borderRadius: radius.full,
-            borderColor: pressed ? colors.outline : colors.outline_variant,
-            backgroundColor: pressed ? colors.surface_container_high : 'transparent',
-            paddingHorizontal: spacing.md,
-          },
-        ]}
-      >
-        <Text
-          allowFontScaling
-          numberOfLines={1}
-          style={[
-            styles.signOutText,
-            {
-              color: colors.on_surface_variant,
-              fontFamily: typography.labelLarge.fontFamily,
-              fontSize: typography.labelLarge.fontSize,
-              fontWeight: '500',
-            },
-          ]}
-        >
-          {STRINGS.movies.signOutAction}
-        </Text>
-      </Pressable>
+      <AccountMenu onSignOut={onSignOut} />
     </View>
   );
 

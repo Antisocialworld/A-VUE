@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
@@ -33,6 +34,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({
   pollIntervalMs = 4000,
 }) => {
   const { colors, spacing, typography, radius } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
 
   const [seats, setSeats] = useState<SeatMapItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -153,6 +155,26 @@ export const SeatMap: React.FC<SeatMapProps> = ({
 
   const rows = useMemo(() => Object.keys(rowGroups).sort(), [rowGroups]);
 
+  // Widest row seat count calculated dynamically from data (no hardcoded 10)
+  const maxSeatsInRow = useMemo(() => {
+    let max = 0;
+    for (const r of Object.keys(rowGroups)) {
+      if (rowGroups[r].length > max) {
+        max = rowGroups[r].length;
+      }
+    }
+    return Math.max(max, 1);
+  }, [rowGroups]);
+
+  // Fit-to-width cell dimensions calculated from window width, padding, row-label column, and widest row
+  const screenHorizontalPadding = spacing.base * 2;
+  const rowLabelColumnWidth = isZoomed ? 24 : 14;
+  const availableSeatsWidth = Math.max(0, windowWidth - screenHorizontalPadding - rowLabelColumnWidth);
+  const rawSeatCellWidth = availableSeatsWidth / maxSeatsInRow;
+  const cellWidth = Math.floor(rawSeatCellWidth);
+  const fitMargin = Math.max(1.5, Math.min(3, Math.floor(cellWidth * 0.08)));
+  const fitSeatSize = Math.max(14, Math.min(32, cellWidth - fitMargin * 2));
+
   // Handle seat tap
   const handleSeatPress = (seat: SeatMapItem) => {
     if (seat.state !== 'available') return;
@@ -220,8 +242,8 @@ export const SeatMap: React.FC<SeatMapProps> = ({
       stateLabel = STRINGS.seatMap.selectedLegend;
     }
 
-    const seatSize = is44PtTarget ? 44 : isZoomed ? 38 : 16;
-    const margin = is44PtTarget ? 4 : isZoomed ? 3 : 1.5;
+    const seatSize = is44PtTarget ? 44 : isZoomed ? 38 : fitSeatSize;
+    const margin = is44PtTarget ? 4 : isZoomed ? 3 : fitMargin;
 
     return (
       <Pressable
@@ -359,7 +381,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({
 
       {/* Zoom Mode Toggle Button (if screen reader not active) */}
       {!isScreenReaderActive && (
-        <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
+        <View style={{ alignItems: 'center', marginBottom: spacing.base }}>
           <Pressable
             onPress={() => setIsZoomed((z) => !z)}
             accessibilityRole="button"
@@ -414,7 +436,11 @@ export const SeatMap: React.FC<SeatMapProps> = ({
           nestedScrollEnabled
           contentContainerStyle={[
             styles.gridContentContainer,
-            { paddingHorizontal: spacing.sm, paddingBottom: spacing.xxl },
+            {
+              justifyContent: isZoomed ? 'flex-start' : 'center',
+              paddingHorizontal: spacing.base,
+              paddingBottom: spacing.xxl,
+            },
           ]}
         >
           <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
@@ -425,7 +451,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({
                     styles.rowHeader,
                     {
                       color: colors.on_surface_variant,
-                      width: isZoomed ? 24 : 14,
+                      width: rowLabelColumnWidth,
                       fontSize: isZoomed ? 12 : 9,
                     },
                   ]}
@@ -491,7 +517,7 @@ const styles = StyleSheet.create({
   gridContentContainer: {
     flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   gridRow: {
     flexDirection: 'row',

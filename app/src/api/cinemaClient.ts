@@ -165,6 +165,22 @@ export class CinemaClient {
   }
 
   /**
+   * Fetches public checkout config (testMode flag)
+   * GET /checkout/config
+   * Fail-safe: if missing or network fails, returns { testMode: true }
+   */
+  public async getCheckoutConfig(): Promise<{ testMode: boolean }> {
+    try {
+      const { data } = await this.request<{ testMode?: boolean }>('/checkout/config', {
+        method: 'GET',
+      });
+      return { testMode: typeof data?.testMode === 'boolean' ? data.testMode : true };
+    } catch {
+      return { testMode: true };
+    }
+  }
+
+  /**
    * Initiates checkout with mandatory Idempotency-Key
    * POST /checkout
    */

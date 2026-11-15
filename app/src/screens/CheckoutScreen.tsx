@@ -54,6 +54,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 
   const [checkoutState, setCheckoutState] = useState<CheckoutState>('idle');
   const [checkoutData, setCheckoutData] = useState<CheckoutResponse | null>(null);
+  const [isTestMode, setIsTestMode] = useState<boolean>(true);
   const [secondsLeft, setSecondsLeft] = useState<number>(() => {
     const expiryMs = new Date(holdResponse.expiresAt).getTime();
     const remaining = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
@@ -65,6 +66,20 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
   const confirmationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef<boolean>(true);
+
+  // Fetch public checkout config for test mode badge (fail-safe to true)
+  useEffect(() => {
+    cinemaClient
+      .getCheckoutConfig()
+      .then((cfg) => {
+        if (typeof cfg.testMode === 'boolean') {
+          setIsTestMode(cfg.testMode);
+        }
+      })
+      .catch(() => {
+        setIsTestMode(true);
+      });
+  }, []);
 
   // Hold countdown timer
   useEffect(() => {
@@ -232,6 +247,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   }
 
   const seatsLabel = selectedSeats.map((s) => `${s.row}${s.number}`).join(', ');
+  const showTestModeBadge = checkoutData?.testMode ?? isTestMode;
 
   return (
     <ScreenShell
@@ -241,35 +257,37 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       contentContainerStyle={[styles.container, { padding: spacing.base }]}
     >
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* TEST MODE BADGE */}
-        <View style={styles.badgeWrapper}>
-          <View
-            style={[
-              styles.badgePill,
-              {
-                backgroundColor: colors.secondary_container,
-                borderColor: colors.secondary,
-                borderRadius: radius.full || 9999,
-                paddingHorizontal: spacing.md,
-                paddingVertical: spacing.xs,
-              },
-            ]}
-          >
-            <Text
-              allowFontScaling
+        {/* TEST MODE BADGE (Shown only in test mode, fail-safe to true if missing) */}
+        {showTestModeBadge ? (
+          <View style={styles.badgeWrapper}>
+            <View
               style={[
-                styles.badgeText,
+                styles.badgePill,
                 {
-                  color: colors.on_secondary_container,
-                  fontFamily: typography.labelSmall.fontFamily,
-                  fontWeight: '700',
+                  backgroundColor: colors.secondary_container,
+                  borderColor: colors.secondary,
+                  borderRadius: radius.full || 9999,
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.xs,
                 },
               ]}
             >
-              {STRINGS.checkout.testModeBadge}
-            </Text>
+              <Text
+                allowFontScaling
+                style={[
+                  styles.badgeText,
+                  {
+                    color: colors.on_secondary_container,
+                    fontFamily: typography.labelSmall.fontFamily,
+                    fontWeight: '700',
+                  },
+                ]}
+              >
+                {STRINGS.checkout.testModeBadge}
+              </Text>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Hold Countdown Timer */}
         <View

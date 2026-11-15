@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Modal, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider } from './src/context/ThemeContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { FontProvider } from './src/context/FontLoader';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
@@ -15,7 +16,9 @@ import { WaitingRoomScreen } from './src/screens/WaitingRoomScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
-import { authClient, AuthSession } from './src/api/authClient';
+import { Button } from './src/components';
+import { STRINGS } from './src/constants/strings';
+import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
 import { cinemaClient } from './src/api/cinemaClient';
 import { HoldSeatsResponse, SeatMapItem, ShowtimeItem } from './src/schemas/cinema';
 
@@ -45,6 +48,8 @@ const MainNavigator: React.FC = () => {
   const [selectedShowtime, setSelectedShowtime] = useState<ShowtimeItem | null>(null);
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
   const [selectedSeats, setSelectedSeats] = useState<SeatMapItem[]>([]);
+  const selectedSeatIdsRef = useRef<string[]>([]);
+  const selectedSeatsRef = useRef<SeatMapItem[]>([]);
   const [holdResponse, setHoldResponse] = useState<HoldSeatsResponse | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
@@ -69,9 +74,42 @@ const MainNavigator: React.FC = () => {
     }
   };
 
-  if (currentRoute === 'gallery') {
-    return <ComponentGalleryScreen onBack={() => setCurrentRoute(activeSession ? 'movies' : 'welcome')} />;
-  }
+  const { colors, spacing, radius, typography, shadows } = useTheme();
+  const [scheduledDeletionInfo, setScheduledDeletionInfo] = useState<ScheduledForDeletionInfo | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = authClient.onScheduledForDeletion((info) => {
+      setScheduledDeletionInfo(info);
+      setRestoreError(null);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleRestoreAccount = async () => {
+    if (!scheduledDeletionInfo || !scheduledDeletionInfo.password) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const session = await authClient.restoreAccount(
+        scheduledDeletionInfo.email,
+        scheduledDeletionInfo.password,
+      );
+      setScheduledDeletionInfo(null);
+      setActiveSession(session);
+      setCurrentRoute('movies');
+    } catch (err: any) {
+      setRestoreError(err?.message || STRINGS.common.genericError);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const renderScreen = () => {
+    if (currentRoute === 'gallery') {
+      return <ComponentGalleryScreen onBack={() => setCurrentRoute(activeSession ? 'movies' : 'welcome')} />;
+    }
 
   if (currentRoute === 'sign_in') {
     return (
@@ -173,13 +211,20 @@ const MainNavigator: React.FC = () => {
         movieTitle={selectedMovieTitle || 'Select Seats'}
         onBack={() => setCurrentRoute('showtimes')}
         onProceedToCheckout={(params) => {
+          selectedSeatIdsRef.current = params.selectedSeatIds;
+          selectedSeatsRef.current = params.selectedSeats;
           setSelectedSeatIds(params.selectedSeatIds);
           setSelectedSeats(params.selectedSeats);
           setHoldResponse(params.holdResponse);
           setCurrentRoute('checkout');
         }}
-        onOpenWaitingRoom={(seatIds) => {
+        onOpenWaitingRoom={(seatIds, seats) => {
+          selectedSeatIdsRef.current = seatIds;
           setSelectedSeatIds(seatIds);
+          if (seats && seats.length > 0) {
+            selectedSeatsRef.current = seats;
+            setSelectedSeats(seats);
+          }
           setCurrentRoute('waiting_room');
         }}
       />
@@ -193,8 +238,15 @@ const MainNavigator: React.FC = () => {
         onBack={() => setCurrentRoute('seat_map')}
         onAdmitted={async (pass) => {
           try {
-            const holdRes = await cinemaClient.holdSeats(selectedShowtime.id, selectedSeatIds, pass);
+            const seatIdsToHold = selectedSeatIdsRef.current.length > 0
+              ? selectedSeatIdsRef.current
+              : selectedSeatIds;
+            const holdRes = await cinemaClient.holdSeats(selectedShowtime.id, seatIdsToHold, pass);
             setHoldResponse(holdRes);
+            if (selectedSeatsRef.current.length > 0) {
+              setSelectedSeats(selectedSeatsRef.current);
+            }
+            setSelectedSeatIds(seatIdsToHold);
             setCurrentRoute('checkout');
           } catch {
             setCurrentRoute('seat_map');
@@ -205,11 +257,13 @@ const MainNavigator: React.FC = () => {
   }
 
   if (currentRoute === 'checkout' && selectedShowtime !== null && holdResponse !== null) {
+    const activeSeats = selectedSeatsRef.current.length > 0 ? selectedSeatsRef.current : selectedSeats;
+    const activeSeatIds = selectedSeatIdsRef.current.length > 0 ? selectedSeatIdsRef.current : selectedSeatIds;
     return (
       <CheckoutScreen
         showtime={selectedShowtime}
-        selectedSeatIds={selectedSeatIds}
-        selectedSeats={selectedSeats}
+        selectedSeatIds={activeSeatIds}
+        selectedSeats={activeSeats}
         holdResponse={holdResponse}
         movieTitle={selectedMovieTitle || 'Checkout'}
         onBack={() => setCurrentRoute('seat_map')}
@@ -244,14 +298,124 @@ const MainNavigator: React.FC = () => {
     );
   }
 
+    return (
+      <WelcomeScreen
+        onNavigateToSignIn={() => setCurrentRoute('sign_in')}
+        onNavigateToSignUp={() => setCurrentRoute('sign_up')}
+        onNavigateToGallery={() => setCurrentRoute('gallery')}
+      />
+    );
+  };
+
   return (
-    <WelcomeScreen
-      onNavigateToSignIn={() => setCurrentRoute('sign_in')}
-      onNavigateToSignUp={() => setCurrentRoute('sign_up')}
-      onNavigateToGallery={() => setCurrentRoute('gallery')}
-    />
+    <>
+      {renderScreen()}
+
+      {/* Account Deletion Restore Prompt Modal */}
+      {scheduledDeletionInfo && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setScheduledDeletionInfo(null)}
+        >
+          <View style={[styles.modalBackdrop, { backgroundColor: colors.scrim + '99' }]}>
+            <View
+              style={[
+                styles.dialogCard,
+                shadows.medium,
+                {
+                  backgroundColor: colors.surface_container,
+                  borderRadius: radius.lg,
+                  padding: spacing.lg,
+                  borderColor: colors.outline_variant,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  typography.titleMedium,
+                  { color: colors.on_surface, marginBottom: spacing.sm, fontWeight: '700' },
+                ]}
+                accessibilityRole="header"
+              >
+                {STRINGS.account.restorePromptTitle}
+              </Text>
+              <Text
+                style={[
+                  typography.bodyMedium,
+                  { color: colors.on_surface_variant, marginBottom: spacing.lg },
+                ]}
+              >
+                {STRINGS.account.restorePromptMessage(
+                  scheduledDeletionInfo.purgeAfter
+                    ? new Date(scheduledDeletionInfo.purgeAfter).toLocaleDateString()
+                    : 'the scheduled date',
+                )}
+              </Text>
+
+              {restoreError ? (
+                <Text
+                  style={[
+                    typography.bodySmall,
+                    { color: colors.error, marginBottom: spacing.md, fontWeight: '600' },
+                  ]}
+                  accessibilityRole="alert"
+                >
+                  {restoreError}
+                </Text>
+              ) : null}
+
+              <View style={styles.dialogButtonRow}>
+                <View style={styles.buttonHalf}>
+                  <Button
+                    title={STRINGS.account.cancelRestoreAction}
+                    onPress={() => setScheduledDeletionInfo(null)}
+                    variant="outlined"
+                    disabled={restoring}
+                    accessibilityLabel={STRINGS.account.cancelRestoreAction}
+                  />
+                </View>
+                <View style={styles.buttonHalf}>
+                  <Button
+                    title={STRINGS.account.restoreAction}
+                    onPress={handleRestoreAccount}
+                    variant="primary"
+                    loading={restoring}
+                    disabled={restoring}
+                    accessibilityLabel={STRINGS.account.restoreAction}
+                  />
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </>
   );
 };
+
+const styles = StyleSheet.create({
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  dialogCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderWidth: 1,
+  },
+  dialogButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  buttonHalf: {
+    flex: 1,
+  },
+});
 
 export default function App() {
   return (

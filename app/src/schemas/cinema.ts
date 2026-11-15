@@ -113,9 +113,16 @@ export const checkoutResponseSchema = z.object({
   currency: z.literal('NGN'),
   paymentLink: z.string().url(),
   isSimulated: z.boolean(),
+  testMode: z.boolean().optional(),
 });
 
 export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;
+
+export const checkoutConfigResponseSchema = z.object({
+  testMode: z.boolean(),
+});
+
+export type CheckoutConfigResponse = z.infer<typeof checkoutConfigResponseSchema>;
 
 // ==============================================================================
 // Tickets Schemas

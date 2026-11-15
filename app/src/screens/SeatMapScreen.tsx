@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Button, ScreenShell, SeatMap, Toast } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
@@ -17,7 +18,7 @@ export interface SeatMapScreenProps {
     selectedSeats: SeatMapItem[];
     holdResponse: HoldSeatsResponse;
   }) => void;
-  onOpenWaitingRoom: (seatIds: string[]) => void;
+  onOpenWaitingRoom: (seatIds: string[], seats?: SeatMapItem[]) => void;
 }
 
 export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
@@ -28,6 +29,7 @@ export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
   onOpenWaitingRoom,
 }) => {
   const { colors, spacing, typography, radius } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
 
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
   const [selectedSeats, setSelectedSeats] = useState<SeatMapItem[]>([]);
@@ -55,7 +57,7 @@ export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
       });
     } catch (err: any) {
       if (err.code === 'WAITING_ROOM_REQUIRED' || err.status === 429) {
-        onOpenWaitingRoom(selectedSeatIds);
+        onOpenWaitingRoom(selectedSeatIds, selectedSeats);
       } else if (err.code === 'SEAT_UNAVAILABLE' || err.status === 409) {
         setToastMessage(STRINGS.seatMap.conflictToast);
       } else if (err.status === 503) {
@@ -106,13 +108,60 @@ export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
         </Text>
       </View>
 
-      {/* Seat Map component */}
-      <SeatMap
-        showtimeId={showtime.id}
-        selectedSeatIds={selectedSeatIds}
-        onSelectionChange={handleSelectionChange}
-        onToast={(msg) => setToastMessage(msg)}
-      />
+      {/* Middle Content: Background Photo (bottom 45% cropped) behind SeatMap */}
+      <View style={styles.seatMapWrapper}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.photoContainer,
+            {
+              height: windowWidth * 0.34,
+            },
+          ]}
+        >
+          <Image
+            source={require('../../assets/photos/seat-map.jpg')}
+            accessibilityRole="image"
+            accessibilityLabel={STRINGS.seatMap.photoAccessibilityLabel}
+            style={styles.photoImage}
+          />
+          {/* Top edge fade into background token colour */}
+          <Svg
+            style={StyleSheet.absoluteFill}
+            width="100%"
+            height="100%"
+            pointerEvents="none"
+          >
+            <Defs>
+              <LinearGradient id="seatMapFade" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.surface} stopOpacity="1" />
+                <Stop offset="0.5" stopColor={colors.surface} stopOpacity="0.4" />
+                <Stop offset="1" stopColor={colors.surface} stopOpacity="0" />
+              </LinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#seatMapFade)" />
+          </Svg>
+          {/* Dimming overlay with token colour */}
+          <View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.scrim,
+                opacity: 0.35,
+              },
+            ]}
+          />
+        </View>
+
+        {/* Seat Map component */}
+        <SeatMap
+          showtimeId={showtime.id}
+          selectedSeatIds={selectedSeatIds}
+          onSelectionChange={handleSelectionChange}
+          onToast={(msg) => setToastMessage(msg)}
+        />
+      </View>
 
       {/* Sticky Bottom Action Bar */}
       <View
@@ -197,6 +246,25 @@ const styles = StyleSheet.create({
   checkoutBtn: {
     minWidth: 180,
     minHeight: 48,
+  },
+  seatMapWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  photoContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+  },
+  photoImage: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    width: '100%',
+    aspectRatio: 1600 / 1203,
   },
 });
 

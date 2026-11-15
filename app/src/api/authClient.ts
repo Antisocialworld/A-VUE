@@ -1,11 +1,15 @@
 import {
+  DeleteAccountInput,
   RequestResetInput,
   ResetPasswordInput,
+  RestoreAccountInput,
   SignInInput,
   SignUpInput,
   VerifyCodeInput,
+  deleteAccountSchema,
   requestResetSchema,
   resetPasswordSchema,
+  restoreAccountSchema,
   signInSchema,
   signUpSchema,
   verifyCodeSchema,
@@ -17,6 +21,23 @@ import {
   saveSessionToken,
 } from '../lib/secureStore';
 
+export class AccountScheduledForDeletionError extends Error {
+  purgeAfter?: string;
+  constructor(message: string, purgeAfter?: string) {
+    super(message);
+    this.name = 'AccountScheduledForDeletionError';
+    this.purgeAfter = purgeAfter;
+  }
+}
+
+export interface ScheduledForDeletionInfo {
+  email: string;
+  password?: string;
+  purgeAfter?: string;
+}
+
+export type ScheduledForDeletionListener = (info: ScheduledForDeletionInfo) => void;
+
 export interface AuthSession {
   token: string;
   user: {
@@ -27,6 +48,21 @@ export interface AuthSession {
 }
 
 export class AuthClient {
+  private deletionListeners: ScheduledForDeletionListener[] = [];
+
+  onScheduledForDeletion(listener: ScheduledForDeletionListener): () => void {
+    this.deletionListeners.push(listener);
+    return () => {
+      this.deletionListeners = this.deletionListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifyScheduledForDeletion(info: ScheduledForDeletionInfo) {
+    for (const listener of this.deletionListeners) {
+      listener(info);
+    }
+  }
+
   private getBaseUrl(): string {
     const url = process.env.EXPO_PUBLIC_API_URL;
     const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
@@ -138,11 +174,25 @@ export class AuthClient {
       } catch {
         // Ignore json parse error
       }
+      if (errorBody?.error?.code === 'ACCOUNT_SCHEDULED_FOR_DELETION') {
+        const err = new AccountScheduledForDeletionError(
+          STRINGS.account.restorePromptTitle,
+          errorBody.error.purgeAfter,
+        );
+        throw err;
+      }
+      if (errorBody?.error?.code === 'HAS_UPCOMING_TICKETS') {
+        const err = new Error(STRINGS.account.hasUpcomingTicketsError);
+        (err as any).code = 'HAS_UPCOMING_TICKETS';
+        throw err;
+      }
       const mappedMsg = this.mapServerErrorCode(
         errorBody?.error?.code,
         errorBody?.error?.message,
       );
-      throw new Error(mappedMsg);
+      const err = new Error(mappedMsg);
+      (err as any).code = errorBody?.error?.code;
+      throw err;
     }
 
     return (await res.json()) as T;
@@ -150,19 +200,30 @@ export class AuthClient {
 
   async signIn(input: SignInInput): Promise<AuthSession> {
     const validated = signInSchema.parse(input);
-    const data = await this.request<{
-      token: string;
-      user: { id: string; email: string; status?: 'active' | 'locked' };
-    }>('/auth/signin', {
-      method: 'POST',
-      body: JSON.stringify(validated),
-    });
+    try {
+      const data = await this.request<{
+        token: string;
+        user: { id: string; email: string; status?: 'active' | 'locked' };
+      }>('/auth/signin', {
+        method: 'POST',
+        body: JSON.stringify(validated),
+      });
 
-    await saveSessionToken(data.token);
-    return {
-      token: data.token,
-      user: data.user,
-    };
+      await saveSessionToken(data.token);
+      return {
+        token: data.token,
+        user: data.user,
+      };
+    } catch (err: any) {
+      if (err instanceof AccountScheduledForDeletionError) {
+        this.notifyScheduledForDeletion({
+          email: validated.email,
+          password: validated.password,
+          purgeAfter: err.purgeAfter,
+        });
+      }
+      throw err;
+    }
   }
 
   async signUp(
@@ -253,6 +314,40 @@ export class AuthClient {
     } finally {
       await deleteSessionToken();
     }
+  }
+
+  async deleteAccount(password: string): Promise<{ purgeAfter: string }> {
+    const validated = deleteAccountSchema.parse({ password, confirm: 'DELETE' });
+    const data = await this.request<{
+      success: true;
+      purgeAfter: string;
+      message: string;
+    }>('/auth/delete', {
+      method: 'POST',
+      body: JSON.stringify(validated),
+    });
+
+    await deleteSessionToken();
+    return { purgeAfter: data.purgeAfter };
+  }
+
+  async restoreAccount(email: string, password: string): Promise<AuthSession> {
+    const validated = restoreAccountSchema.parse({ email, password });
+    const data = await this.request<{
+      token: string;
+      user: { id: string; email: string; status?: 'active' | 'locked' };
+      restored: true;
+      message: string;
+    }>('/auth/restore', {
+      method: 'POST',
+      body: JSON.stringify(validated),
+    });
+
+    await saveSessionToken(data.token);
+    return {
+      token: data.token,
+      user: data.user,
+    };
   }
 
   async me(): Promise<{ user: { id: string; email: string } } | null> {

@@ -23,6 +23,7 @@ export interface TextFieldProps {
   secureTextEntry?: boolean;
   rightAccessory?: React.ReactNode;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  autoCorrect?: boolean;
   keyboardType?: KeyboardTypeOptions;
   autoFocus?: boolean;
   accessibilityLabel?: string;
@@ -46,6 +47,7 @@ export const TextField = React.forwardRef<React.ComponentRef<typeof TextInput>, 
       secureTextEntry = false,
       rightAccessory,
       autoCapitalize = 'none',
+      autoCorrect,
       keyboardType = 'default',
       autoFocus = false,
       accessibilityLabel,
@@ -152,6 +154,7 @@ export const TextField = React.forwardRef<React.ComponentRef<typeof TextInput>, 
             editable={!disabled}
             secureTextEntry={secureTextEntry}
             autoCapitalize={autoCapitalize}
+            autoCorrect={autoCorrect}
             keyboardType={keyboardType}
             onFocus={handleFocus}
             onBlur={handleBlur}

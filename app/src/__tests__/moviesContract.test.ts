@@ -201,10 +201,9 @@ describe('MoviesHomeScreen Header Restyle — Option B (Task 1)', () => {
     'utf-8',
   );
 
-  it('header uses strings file keys for My tickets and Sign out without hardcoded labels', () => {
+  it('header uses strings file key for My tickets label without hardcoded text', () => {
     expect(homeSource).toContain('STRINGS.tickets.myTicketsHeader');
-    expect(homeSource).toContain('STRINGS.movies.signOutAction');
-    expect(homeSource).toContain('STRINGS.movies.signOutAccessibilityHint');
+    expect(homeSource).toContain('accessibilityLabel={STRINGS.tickets.myTicketsHeader}');
   });
 
   it('header contains zero hardcoded hex colors and uses design tokens exclusively', () => {
@@ -218,8 +217,7 @@ describe('MoviesHomeScreen Header Restyle — Option B (Task 1)', () => {
     // Verify token usages
     expect(headerCode).toContain('colors.primary');
     expect(headerCode).toContain('colors.on_primary');
-    expect(headerCode).toContain('colors.on_surface_variant');
-    expect(headerCode).toContain('colors.outline_variant');
+    expect(headerCode).toContain('colors.primary_text_high');
     expect(headerCode).toContain('radius.full');
     expect(headerCode).toContain('spacing.sm');
   });
@@ -232,11 +230,11 @@ describe('MoviesHomeScreen Header Restyle — Option B (Task 1)', () => {
     expect(homeSource).toContain('accessibilityLabel={STRINGS.tickets.myTicketsHeader}');
   });
 
-  it('Sign out pill is quiet outlined, height 44, fully rounded with muted text', () => {
-    expect(homeSource).toContain('styles.signOutPill');
-    expect(homeSource).toContain('color: colors.on_surface_variant');
-    expect(homeSource).toContain('accessibilityRole="button"');
-    expect(homeSource).toContain('accessibilityLabel={STRINGS.movies.signOutAction}');
+  it('header renders AccountMenu with onSignOut and My tickets pill enforces height 44', () => {
+    expect(homeSource).toContain('<AccountMenu onSignOut={onSignOut} />');
+    expect(homeSource).toContain('myTicketsPill: {');
+    expect(homeSource).toContain('height: 44');
+    expect(homeSource).toContain('minHeight: 44');
   });
 
   it('TicketIcon is a valid SVG vector icon without hex colors', () => {

@@ -4,6 +4,8 @@
  * Rule: All text from the strings file; less visible text on mobile.
  */
 
+export const ACCOUNT_DELETION_GRACE_DAYS = 30;
+
 export const STRINGS = {
   appName: 'A VUE',
   tagline: 'A view. Your view. Our view.',
@@ -18,6 +20,7 @@ export const STRINGS = {
     error: 'Error',
     genericError: 'Something went wrong. Please try again.',
     or: 'or',
+    continue: 'Continue',
   },
 
   welcome: {
@@ -158,6 +161,7 @@ export const STRINGS = {
     seatsLeft: (count: number) => `${count} left`,
     selectSeatsAction: 'Select seats',
     footerPhotoAccessibilityLabel: 'Cinema auditorium showing screen and seating',
+    cinemaCardPhotoAccessibilityLabel: 'Cinema marquee decorative photo',
   },
 
   seatMap: {
@@ -226,6 +230,34 @@ export const STRINGS = {
     cancelledStatus: 'Cancelled',
     usedAtTime: (time: string) => `Used at ${time}`,
     cancelledRefundNotice: 'Showtime cancelled. Amount auto-refunded to original payment method via ledger.',
+  },
+
+  account: {
+    gracePeriodDays: ACCOUNT_DELETION_GRACE_DAYS,
+    menuAction: 'Account menu',
+    menuAccessibilityLabel: 'Account menu',
+    menuAccessibilityHint: 'Opens account options menu',
+    signOutAction: 'Sign out',
+    deleteAccountAction: 'Delete account',
+    deleteConfirmTitle: 'Delete Account',
+    deleteStep1Prompt: 'To confirm deletion, type DELETE below:',
+    deleteStep1Placeholder: 'DELETE',
+    deleteStep2Prompt: 'Enter your password to authorize account deletion.',
+    deleteGracePeriodNotice:
+      `Your account will enter a ${ACCOUNT_DELETION_GRACE_DAYS}-day grace period and be permanently deleted after ${ACCOUNT_DELETION_GRACE_DAYS} days. Until then, sign in and tap Restore to keep it.`,
+    deleteSubmitAction: 'Delete My Account',
+    deleteCancelAction: 'Cancel',
+    deleteNextAction: 'Continue',
+    hasUpcomingTicketsError:
+      'Cannot delete account with upcoming tickets. Please wait until your showtime has passed or cancel your tickets.',
+    deleteSuccessTitle: 'Account Scheduled for Deletion',
+    deleteSuccessMessage: (dateStr: string) =>
+      `Your account is scheduled for deletion on ${dateStr}. You have been signed out. Until then, sign in and tap Restore to keep it.`,
+    restorePromptTitle: 'Account Scheduled for Deletion',
+    restorePromptMessage: (dateStr: string) =>
+      `This account is scheduled for permanent deletion on ${dateStr}. Would you like to restore it now?`,
+    restoreAction: 'Restore Account',
+    cancelRestoreAction: 'Cancel',
   },
 
   accessibility: {
