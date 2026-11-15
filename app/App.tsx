@@ -17,7 +17,7 @@ import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
 import { Button } from './src/components';
-import { STRINGS } from './src/constants/strings';
+import { STRINGS, formatDeletableDate } from './src/constants/strings';
 import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
 import { cinemaClient } from './src/api/cinemaClient';
 import { HoldSeatsResponse, SeatMapItem, ShowtimeItem } from './src/schemas/cinema';
@@ -348,9 +348,7 @@ const MainNavigator: React.FC = () => {
                 ]}
               >
                 {STRINGS.account.restorePromptMessage(
-                  scheduledDeletionInfo.purgeAfter
-                    ? new Date(scheduledDeletionInfo.purgeAfter).toLocaleDateString()
-                    : 'the scheduled date',
+                  formatDeletableDate(scheduledDeletionInfo.purgeAfter),
                 )}
               </Text>
 

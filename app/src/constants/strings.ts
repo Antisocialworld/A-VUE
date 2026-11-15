@@ -6,6 +6,45 @@
 
 export const ACCOUNT_DELETION_GRACE_DAYS = 30;
 
+export const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+export function formatDeletableDate(isoDateString?: string | null): string {
+  if (!isoDateString) return 'the scheduled date';
+  const isoMatch = isoDateString.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const year = isoMatch[1];
+    const monthNum = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    const monthName = MONTH_NAMES[monthNum - 1];
+    if (monthName && !isNaN(day)) {
+      return `${day} ${monthName} ${year}`;
+    }
+  }
+  const date = new Date(isoDateString);
+  if (!isNaN(date.getTime())) {
+    const day = date.getUTCDate();
+    const monthName = MONTH_NAMES[date.getUTCMonth()];
+    const year = date.getUTCFullYear();
+    if (monthName) {
+      return `${day} ${monthName} ${year}`;
+    }
+  }
+  return isoDateString;
+}
+
 export const STRINGS = {
   appName: 'A VUE',
   tagline: 'A view. Your view. Our view.',
@@ -251,14 +290,15 @@ export const STRINGS = {
     deleteNextAction: 'Continue',
     hasUpcomingTicketsError:
       'Cannot delete account with upcoming tickets. Please wait until your showtime has passed or cancel your tickets.',
-    deleteSuccessTitle: 'Account Scheduled for Deletion',
-    deleteSuccessMessage: (dateStr: string) =>
-      `Your account is scheduled for deletion on ${dateStr}. You have been signed out. Until then, sign in and tap Restore to keep it.`,
-    restorePromptTitle: 'Account Scheduled for Deletion',
+    deleteSuccessTitle: 'Account deletion started',
+    deleteSuccessMessage:
+      `You have ${ACCOUNT_DELETION_GRACE_DAYS} days to Restore your account. After that, your account is deleted for good. You've been signed out.`,
+    deleteSuccessAction: 'Got it',
+    restorePromptTitle: 'Restore your account?',
     restorePromptMessage: (dateStr: string) =>
-      `This account is scheduled for permanent deletion on ${dateStr}. Would you like to restore it now?`,
-    restoreAction: 'Restore Account',
-    cancelRestoreAction: 'Cancel',
+      `This account is scheduled for deletion on ${dateStr}. Restore it to keep using it.`,
+    restoreAction: 'Restore account',
+    cancelRestoreAction: 'Not now',
   },
 
   accessibility: {

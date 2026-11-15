@@ -78,13 +78,8 @@ export const AccountMenu: React.FC<AccountMenuProps> = ({
     setErrorMessage(null);
 
     try {
-      const res = await authClient.deleteAccount(password);
-      const purgeDate = new Date(res.purgeAfter);
-      const formattedDate = !isNaN(purgeDate.getTime())
-        ? purgeDate.toLocaleDateString()
-        : res.purgeAfter;
-
-      setSuccessNotice(STRINGS.account.deleteSuccessMessage(formattedDate));
+      await authClient.deleteAccount(password);
+      setSuccessNotice(STRINGS.account.deleteSuccessMessage);
     } catch (err: any) {
       if (err?.code === 'HAS_UPCOMING_TICKETS' || err?.message?.includes('upcoming tickets')) {
         setErrorMessage(STRINGS.account.hasUpcomingTicketsError);
@@ -260,10 +255,10 @@ export const AccountMenu: React.FC<AccountMenuProps> = ({
                   {successNotice}
                 </Text>
                 <Button
-                  title={STRINGS.common.continue}
+                  title={STRINGS.account.deleteSuccessAction}
                   onPress={handleFinalSuccessSignOut}
                   variant="primary"
-                  accessibilityLabel={STRINGS.common.continue}
+                  accessibilityLabel={STRINGS.account.deleteSuccessAction}
                 />
               </View>
             ) : deleteStep === 1 ? (

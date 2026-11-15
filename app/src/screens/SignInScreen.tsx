@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Button, FormError, PasswordField, ScreenShell, TextField } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
-import { authClient, AuthSession } from '../api/authClient';
+import { authClient, AuthSession, AccountScheduledForDeletionError } from '../api/authClient';
 import { signInSchema } from '../schemas/auth';
 
 export interface SignInScreenProps {
@@ -46,7 +46,15 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
       const session = await authClient.signIn(validationResult.data);
       onSignInSuccess(session);
     } catch (err: any) {
-      setFormError(err.message || STRINGS.signIn.invalidCredentialsError);
+      if (
+        err instanceof AccountScheduledForDeletionError ||
+        err?.name === 'AccountScheduledForDeletionError' ||
+        err?.code === 'ACCOUNT_SCHEDULED_FOR_DELETION'
+      ) {
+        setFormError(null);
+      } else {
+        setFormError(err.message || STRINGS.signIn.invalidCredentialsError);
+      }
     } finally {
       setLoading(false);
     }

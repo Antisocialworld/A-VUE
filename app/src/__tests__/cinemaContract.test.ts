@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { STRINGS } from '../constants/strings';
+import { STRINGS, formatDeletableDate } from '../constants/strings';
 import {
   MAX_SEATS_PER_BOOKING,
   checkoutBodySchema,
@@ -229,6 +229,34 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
       expect(waitingRoomSrc).not.toContain('estimatedWaitSeconds');
       expect(waitingRoomSrc).toContain('#{position}');
       expect(waitingRoomSrc).toContain('accessibilityLabel={STRINGS.waitingRoom.spotOpensMessage}');
+    });
+  });
+
+  // 8. Account Deletion Dialogs & Date Helper Contract (Task A & B)
+  describe('Account Deletion Dialogs & Date Helper Contract (Task A & B)', () => {
+    it('verifies Dialog 1 wording and action in STRINGS.account', () => {
+      expect(STRINGS.account.deleteSuccessTitle).toBe('Account deletion started');
+      expect(STRINGS.account.deleteSuccessMessage).toBe(
+        "You have 30 days to Restore your account. After that, your account is deleted for good. You've been signed out."
+      );
+      expect(STRINGS.account.deleteSuccessAction).toBe('Got it');
+    });
+
+    it('verifies Dialog 2 wording and actions in STRINGS.account', () => {
+      expect(STRINGS.account.restorePromptTitle).toBe('Restore your account?');
+      expect(STRINGS.account.restorePromptMessage('15 December 2026')).toBe(
+        'This account is scheduled for deletion on 15 December 2026. Restore it to keep using it.'
+      );
+      expect(STRINGS.account.cancelRestoreAction).toBe('Not now');
+      expect(STRINGS.account.restoreAction).toBe('Restore account');
+    });
+
+    it('verifies formatDeletableDate parses ISO strings to "day Month year" without Intl or toLocaleDateString', () => {
+      expect(formatDeletableDate('2026-12-15T00:00:00.000Z')).toBe('15 December 2026');
+      expect(formatDeletableDate('2026-12-15')).toBe('15 December 2026');
+      expect(formatDeletableDate('2026-05-01T14:30:00Z')).toBe('1 May 2026');
+      expect(formatDeletableDate(null)).toBe('the scheduled date');
+      expect(formatDeletableDate(undefined)).toBe('the scheduled date');
     });
   });
 });

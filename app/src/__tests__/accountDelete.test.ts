@@ -7,12 +7,14 @@ describe('App Account Menu & Deletion Client Flow (Task 4)', () => {
   const authClientPath = path.resolve(__dirname, '../api/authClient.ts');
   const appPath = path.resolve(__dirname, '../../App.tsx');
   const moviesHomePath = path.resolve(__dirname, '../screens/MoviesHomeScreen.tsx');
+  const signInPath = path.resolve(__dirname, '../screens/SignInScreen.tsx');
   const stringsPath = path.resolve(__dirname, '../constants/strings.ts');
 
   const accountMenuSrc = fs.readFileSync(accountMenuPath, 'utf-8');
   const authClientSrc = fs.readFileSync(authClientPath, 'utf-8');
   const appSrc = fs.readFileSync(appPath, 'utf-8');
   const moviesHomeSrc = fs.readFileSync(moviesHomePath, 'utf-8');
+  const signInSrc = fs.readFileSync(signInPath, 'utf-8');
   const stringsSrc = fs.readFileSync(stringsPath, 'utf-8');
 
   it('strings.ts defines complete STRINGS.account section with menu, grace notice, and errors', () => {
@@ -88,5 +90,24 @@ describe('App Account Menu & Deletion Client Flow (Task 4)', () => {
     expect(appSrc).toContain('STRINGS.account.restorePromptMessage');
     expect(appSrc).toContain('STRINGS.account.restoreAction');
     expect(appSrc).toContain('authClient.restoreAccount(');
+  });
+
+  it('Dialog 1 and Dialog 2 use new wording, actions, and custom date formatting (Task A & B)', () => {
+    expect(stringsSrc).toContain("deleteSuccessTitle: 'Account deletion started'");
+    expect(stringsSrc).toContain('deleteSuccessAction: \'Got it\'');
+    expect(stringsSrc).toContain("restorePromptTitle: 'Restore your account?'");
+    expect(stringsSrc).toContain("restoreAction: 'Restore account'");
+    expect(stringsSrc).toContain("cancelRestoreAction: 'Not now'");
+    expect(stringsSrc).toContain('export function formatDeletableDate');
+    expect(accountMenuSrc).toContain('STRINGS.account.deleteSuccessAction');
+    expect(accountMenuSrc).not.toContain('toLocaleDateString');
+    expect(appSrc).toContain('formatDeletableDate(scheduledDeletionInfo.purgeAfter)');
+    expect(appSrc).not.toContain('toLocaleDateString');
+  });
+
+  it('SignInScreen suppresses form error banner for AccountScheduledForDeletionError (Task C)', () => {
+    expect(signInSrc).toContain('AccountScheduledForDeletionError');
+    expect(signInSrc).toContain('err instanceof AccountScheduledForDeletionError');
+    expect(signInSrc).toContain('setFormError(null)');
   });
 });
