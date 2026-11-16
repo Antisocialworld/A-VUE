@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AppState,
+  AppStateStatus,
   Image,
   Pressable,
   ScrollView,
@@ -14,6 +16,7 @@ import { STRINGS } from '../constants/strings';
 import { ShowtimeItem } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
 import { formatKoboToNaira } from '../utils/money';
+import { buildDateOptions, DateOption, toLocalDateKey } from '../utils/date';
 import { WORDMARK_BOX, WORDMARK_PATHS } from '../components/Wordmark';
 import colorData from '../tokens/color-tokens-orange-green-yellow.json';
 
@@ -32,12 +35,7 @@ export interface ShowtimesScreenProps {
   posterUrl?: string;
   releaseYear?: string;
   voteAverage?: number;
-}
-
-interface DateOption {
-  dateStr: string; // YYYY-MM-DD
-  dayLabel: string; // "Today", "Tomorrow", "Mon"
-  dateNum: number; // 14, 15...
+  isFocused?: boolean;
 }
 
 export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
@@ -48,6 +46,7 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
   posterUrl,
   releaseYear,
   voteAverage,
+  isFocused = true,
 }) => {
   const { colors, spacing, typography, radius } = useTheme();
 
@@ -59,36 +58,39 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
   const hasPoster = Boolean(posterUrl && !imageError);
   const hasMeta = Boolean(releaseYear || typeof voteAverage === 'number');
 
-  // 7-day date strip options
-  const dateOptions: DateOption[] = useMemo(() => {
-    const list: DateOption[] = [];
-    const today = new Date();
+  // 7-day date strip options: rebuilt on focus and when app returns to foreground (Task 1)
+  const [dateOptions, setDateOptions] = useState<DateOption[]>(() => buildDateOptions());
 
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => {
+    const initial = buildDateOptions();
+    return initial[0]?.dateStr || '';
+  });
 
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const dateStr = `${yyyy}-${mm}-${dd}`;
-
-      let dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
-      if (i === 0) dayLabel = STRINGS.showtimes.dateToday;
-      if (i === 1) dayLabel = STRINGS.showtimes.dateTomorrow;
-
-      list.push({
-        dateStr,
-        dayLabel,
-        dateNum: d.getDate(),
-      });
-    }
-    return list;
+  const refreshDateOptions = useCallback(() => {
+    const newOptions = buildDateOptions();
+    setDateOptions(newOptions);
+    setSelectedDateStr((prevSelected) => {
+      const stillPresent = newOptions.some((opt) => opt.dateStr === prevSelected);
+      return stillPresent ? prevSelected : (newOptions[0]?.dateStr || '');
+    });
   }, []);
 
-  const [selectedDateStr, setSelectedDateStr] = useState<string>(
-    dateOptions[0]?.dateStr || ''
-  );
+  // Rebuild dateOptions when the screen gains focus (on mount or when isFocused becomes true)
+  useEffect(() => {
+    if (isFocused) {
+      refreshDateOptions();
+    }
+  }, [isFocused, refreshDateOptions]);
+
+  // Rebuild dateOptions when the app returns to the foreground (AppState becomes 'active')
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refreshDateOptions();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshDateOptions]);
 
   const fetchShowtimes = useCallback(async () => {
     setLoading(true);
@@ -108,11 +110,10 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     fetchShowtimes();
   }, [fetchShowtimes]);
 
-  // Filter showtimes for the selected date
+  // Filter showtimes for the selected date (using local date key via shared helper)
   const filteredShowtimes = useMemo(() => {
     return showtimes.filter((st) => {
-      const stDate = st.startsAt.split('T')[0];
-      return stDate === selectedDateStr;
+      return toLocalDateKey(st.startsAt) === selectedDateStr;
     });
   }, [showtimes, selectedDateStr]);
 
