@@ -218,6 +218,8 @@ export const STRINGS = {
     serviceUnavailableToast: 'Seat hold service temporarily unavailable. Please retry.',
     proceedToCheckout: 'Proceed to checkout',
     selectedCount: (count: number) => `${count} seat${count === 1 ? '' : 's'} selected`,
+    zoomHint: 'Tap the seat map to zoom in, then tap a seat to select it.',
+    rateLimitToast: 'Too many attempts. Wait a moment, then try again.',
     seatAccessibilityLabel: (row: string, num: number, state: string, accessible: boolean) =>
       `Row ${row}, seat ${num}, ${accessible ? 'wheelchair accessible, ' : ''}${state}`,
   },

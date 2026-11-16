@@ -56,8 +56,10 @@ export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
         holdResponse: holdRes,
       });
     } catch (err: any) {
-      if (err.code === 'WAITING_ROOM_REQUIRED' || err.status === 429) {
+      if (err.code === 'WAITING_ROOM_REQUIRED') {
         onOpenWaitingRoom(selectedSeatIds, selectedSeats);
+      } else if (err.code === 'RATE_LIMIT_EXCEEDED') {
+        setToastMessage(STRINGS.seatMap.rateLimitToast);
       } else if (err.code === 'SEAT_UNAVAILABLE' || err.status === 409) {
         setToastMessage(STRINGS.seatMap.conflictToast);
       } else if (err.status === 503) {

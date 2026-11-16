@@ -6,6 +6,7 @@ import {
   EmptyState,
   FormError,
   Logo,
+  MoviesEmptyState,
   PasswordField,
   QrCodeView,
   ScreenShell,
@@ -277,6 +278,14 @@ export const ComponentGalleryScreen: React.FC<ComponentGalleryScreenProps> = ({ 
         onActionPress={() => {}}
         showWatermark
       />
+
+      {/* ---------------- 8. MOVIES EMPTY STATE (SHARED COMPONENT) ---------------- */}
+      {renderSectionHeader('Movies Empty State (Photo & EmptyState)')}
+
+      {renderStateLabel('MoviesEmptyState — Shared Component (PhotoFade + EmptyState)')}
+      <View style={{ width: '100%', borderWidth: 1, borderColor: colors.outline_variant, borderRadius: radius.md, overflow: 'hidden' }}>
+        <MoviesEmptyState onRetry={() => {}} />
+      </View>
 
       {renderSectionHeader('Seat Map & QR Components')}
       {renderStateLabel('Interactive Seat Map')}

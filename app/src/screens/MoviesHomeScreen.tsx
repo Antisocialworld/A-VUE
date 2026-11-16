@@ -12,7 +12,7 @@ import {
   Button,
   EmptyState,
   MovieCard,
-  PhotoFade,
+  MoviesEmptyState,
   ScreenShell,
   Skeleton,
   TicketIcon,
@@ -229,20 +229,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
           />
         </View>
       ) : movies.length === 0 ? (
-        <View style={[styles.centeredState, { padding: spacing.xl }]}>
-          <PhotoFade
-            source={require('../../assets/photos/movies-empty.jpg')}
-            decorative
-            style={[styles.emptyPhoto, { borderRadius: radius.md, marginBottom: spacing.base }]}
-          />
-          <EmptyState
-            title={STRINGS.movies.emptyStateTitle}
-            message={STRINGS.movies.emptyStateMessage}
-            actionTitle={STRINGS.common.retry}
-            onActionPress={handleRefresh}
-            showWatermark
-          />
-        </View>
+        <MoviesEmptyState onRetry={handleRefresh} />
       ) : (
         <FlatList
           data={movies}

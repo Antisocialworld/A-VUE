@@ -411,6 +411,23 @@ export const SeatMap: React.FC<SeatMapProps> = ({
               {isZoomed ? 'Fit scale (overview)' : 'Zoom in (44 pt targets)'}
             </Text>
           </Pressable>
+
+          {!isZoomed && (
+            <Text
+              allowFontScaling
+              style={[
+                styles.zoomHintText,
+                {
+                  color: colors.on_surface_variant,
+                  fontFamily: typography.bodySmall.fontFamily,
+                  fontSize: typography.bodySmall.fontSize,
+                  marginTop: spacing.sm,
+                },
+              ]}
+            >
+              {STRINGS.seatMap.zoomHint}
+            </Text>
+          )}
         </View>
       )}
 
@@ -514,6 +531,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   zoomToggleText: {},
+  zoomHintText: {
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
   gridContentContainer: {
     flexGrow: 1,
     justifyContent: 'center',

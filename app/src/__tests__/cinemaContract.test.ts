@@ -263,6 +263,7 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
   // 9. PhotoFade & Photo Placement Contract (Task B & C)
   describe('PhotoFade & Photo Placement Contract (Task B & C)', () => {
     const photoFadePath = path.resolve(__dirname, '../components/PhotoFade.tsx');
+    const moviesEmptyStatePath = path.resolve(__dirname, '../components/MoviesEmptyState.tsx');
     const welcomeScreenPath = path.resolve(__dirname, '../screens/WelcomeScreen.tsx');
     const appPath = path.resolve(__dirname, '../../App.tsx');
     const moviesHomePath = path.resolve(__dirname, '../screens/MoviesHomeScreen.tsx');
@@ -304,9 +305,11 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
       expect(appSrc).toContain('PhotoFade');
       expect(appSrc).toContain("require('./assets/photos/splash-art.png')");
 
-      // 3. movies-empty.jpg -> MoviesHomeScreen (movies empty state)
-      expect(moviesHomeSrc).toContain('PhotoFade');
-      expect(moviesHomeSrc).toContain("require('../../assets/photos/movies-empty.jpg')");
+      // 3. movies-empty.jpg -> MoviesHomeScreen via MoviesEmptyState (movies empty state)
+      const moviesEmptyStateSrc = fs.readFileSync(moviesEmptyStatePath, 'utf-8');
+      expect(moviesHomeSrc).toContain('MoviesEmptyState');
+      expect(moviesEmptyStateSrc).toContain('PhotoFade');
+      expect(moviesEmptyStateSrc).toContain("require('../../assets/photos/movies-empty.jpg')");
 
       // 4. my-tickets.jpg -> MyTicketsScreen (my tickets empty state)
       expect(myTicketsSrc).toContain('PhotoFade');

@@ -42,4 +42,11 @@ describe('Waiting Room Seat Carry Contract (Task A)', () => {
     expect(appSrc).toContain('const activeSeats = selectedSeatsRef.current.length > 0 ? selectedSeatsRef.current : selectedSeats');
     expect(appSrc).toContain('selectedSeats={activeSeats}');
   });
+
+  it('SeatMapScreen opens waiting room strictly on WAITING_ROOM_REQUIRED and toasts on RATE_LIMIT_EXCEEDED', () => {
+    expect(seatMapScreenSrc).toContain("if (err.code === 'WAITING_ROOM_REQUIRED')");
+    expect(seatMapScreenSrc).not.toContain("err.status === 429");
+    expect(seatMapScreenSrc).toContain("else if (err.code === 'RATE_LIMIT_EXCEEDED')");
+    expect(seatMapScreenSrc).toContain("setToastMessage(STRINGS.seatMap.rateLimitToast)");
+  });
 });

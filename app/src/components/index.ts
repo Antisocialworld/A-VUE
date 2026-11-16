@@ -19,4 +19,5 @@ export * from './SeatMap';
 export * from './TicketIcon';
 export * from './AccountMenu';
 export * from './PhotoFade';
+export * from './MoviesEmptyState';
 
