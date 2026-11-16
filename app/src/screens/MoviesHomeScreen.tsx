@@ -12,6 +12,7 @@ import {
   Button,
   EmptyState,
   MovieCard,
+  PhotoFade,
   ScreenShell,
   Skeleton,
   TicketIcon,
@@ -229,6 +230,11 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
         </View>
       ) : movies.length === 0 ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
+          <PhotoFade
+            source={require('../../assets/photos/movies-empty.jpg')}
+            decorative
+            style={[styles.emptyPhoto, { borderRadius: radius.md, marginBottom: spacing.base }]}
+          />
           <EmptyState
             title={STRINGS.movies.emptyStateTitle}
             message={STRINGS.movies.emptyStateMessage}
@@ -329,6 +335,12 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyPhoto: {
+    width: '100%',
+    maxWidth: 280,
+    height: 160,
+    alignSelf: 'center',
   },
   footerContainer: {
     width: '100%',

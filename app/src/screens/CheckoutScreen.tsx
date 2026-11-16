@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Button, EmptyState, ScreenShell } from '../components';
+import { Button, EmptyState, PhotoFade, ScreenShell } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import {
@@ -257,6 +257,13 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       contentContainerStyle={[styles.container, { padding: spacing.base }]}
     >
       <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Checkout Header Photo (Task C) */}
+        <PhotoFade
+          source={require('../../assets/photos/checkout.jpg')}
+          decorative
+          style={[styles.headerPhoto, { borderRadius: radius.md, marginBottom: spacing.md }]}
+        />
+
         {/* TEST MODE BADGE (Shown only in test mode, fail-safe to true if missing) */}
         {showTestModeBadge ? (
           <View style={styles.badgeWrapper}>
@@ -519,6 +526,10 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerPhoto: {
+    width: '100%',
+    height: 160,
   },
   centeredContainer: {
     flex: 1,

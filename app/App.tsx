@@ -16,7 +16,7 @@ import { WaitingRoomScreen } from './src/screens/WaitingRoomScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
-import { Button } from './src/components';
+import { Button, PhotoFade } from './src/components';
 import { STRINGS, formatDeletableDate } from './src/constants/strings';
 import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
 import { cinemaClient } from './src/api/cinemaClient';
@@ -52,6 +52,14 @@ const MainNavigator: React.FC = () => {
   const selectedSeatsRef = useRef<SeatMapItem[]>([]);
   const [holdResponse, setHoldResponse] = useState<HoldSeatsResponse | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [showSplash, setShowSplash] = useState<boolean>(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleSignInSuccess = (session: AuthSession) => {
     setActiveSession(session);
@@ -311,6 +319,17 @@ const MainNavigator: React.FC = () => {
     <>
       {renderScreen()}
 
+      {/* In-app Splash Overlay (Task C) */}
+      {showSplash && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <PhotoFade
+            source={require('./assets/photos/splash-art.png')}
+            decorative
+            style={styles.splashOverlayPhoto}
+          />
+        </View>
+      )}
+
       {/* Account Deletion Restore Prompt Modal */}
       {scheduledDeletionInfo && (
         <Modal
@@ -412,6 +431,11 @@ const styles = StyleSheet.create({
   },
   buttonHalf: {
     flex: 1,
+  },
+  splashOverlayPhoto: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
 });
 

@@ -167,7 +167,7 @@ describe('WelcomeHero Layout & Geometry', () => {
   });
 
   describe('Hero Long-Press Handler & Sibling Overlay Static Test (Task 9d)', () => {
-    it('verifies transparent overlay Pressable is a sibling of WelcomeHero with delayLongPress 2000 and matching handler', () => {
+    it('verifies transparent overlay Pressable is a sibling of PhotoFade with delayLongPress 2000 and matching handler', () => {
       const welcomePath = path.resolve(__dirname, '../screens/WelcomeScreen.tsx');
       const welcomeContent = fs.readFileSync(welcomePath, 'utf-8');
 
@@ -178,19 +178,20 @@ describe('WelcomeHero Layout & Geometry', () => {
       expect(welcomeContent).toContain('onLongPress={onNavigateToGallery}');
       expect(welcomeContent).toContain('onPress={onNavigateToGallery}');
 
-      // 3. WelcomeHero exists with pointerEvents="none"
-      expect(welcomeContent).toContain('<WelcomeHero');
-      expect(welcomeContent).toContain('pointerEvents="none"');
+      // 3. PhotoFade exists rendering welcome-art.png and WelcomeHero is not rendered
+      expect(welcomeContent).toContain('<PhotoFade');
+      expect(welcomeContent).toContain("require('../../assets/photos/welcome-art.png')");
+      expect(welcomeContent).not.toContain('<WelcomeHero');
 
-      // 4. Verify overlay Pressable is a sibling of WelcomeHero inside heroContainer
+      // 4. Verify overlay Pressable is a sibling of PhotoFade inside heroContainer
       const heroContainerIndex = welcomeContent.indexOf('styles.heroContainer');
-      const heroIndex = welcomeContent.indexOf('<WelcomeHero', heroContainerIndex);
+      const photoIndex = welcomeContent.indexOf('<PhotoFade', heroContainerIndex);
       const overlayPressableIndex = welcomeContent.indexOf('styles.heroOverlayPressable', heroContainerIndex);
       const closeContainerIndex = welcomeContent.indexOf('</View>', overlayPressableIndex);
 
       expect(heroContainerIndex).toBeGreaterThan(-1);
-      expect(heroIndex).toBeGreaterThan(heroContainerIndex);
-      expect(overlayPressableIndex).toBeGreaterThan(heroIndex);
+      expect(photoIndex).toBeGreaterThan(heroContainerIndex);
+      expect(overlayPressableIndex).toBeGreaterThan(photoIndex);
       expect(closeContainerIndex).toBeGreaterThan(overlayPressableIndex);
     });
   });

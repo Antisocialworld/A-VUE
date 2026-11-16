@@ -5,7 +5,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { ScreenShell } from '../components';
+import { PhotoFade, ScreenShell } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { cinemaClient } from '../api/cinemaClient';
@@ -82,6 +82,11 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           },
         ]}
       >
+        <PhotoFade
+          source={require('../../assets/photos/waiting-room.jpg')}
+          decorative
+          style={[styles.headerPhoto, { borderRadius: radius.sm, marginBottom: spacing.lg }]}
+        />
         <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: spacing.lg }} />
 
         <Text
@@ -213,6 +218,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     textAlign: 'center',
+  },
+  headerPhoto: {
+    width: '100%',
+    height: 140,
   },
   titleText: {
     textAlign: 'center',

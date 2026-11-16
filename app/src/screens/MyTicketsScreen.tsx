@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { EmptyState, ScreenShell, Skeleton } from '../components';
+import { EmptyState, PhotoFade, ScreenShell, Skeleton } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { TicketItem } from '../schemas/cinema';
@@ -133,8 +133,8 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
                   item.status === 'active'
                     ? colors.secondary_container
                     : item.status === 'used'
-                    ? colors.surface_container_highest
-                    : colors.error_container,
+                      ? colors.surface_container_highest
+                      : colors.error_container,
                 borderRadius: radius.sm,
                 paddingHorizontal: spacing.sm,
                 paddingVertical: 2,
@@ -150,8 +150,8 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
                     item.status === 'active'
                       ? colors.on_secondary_container
                       : item.status === 'used'
-                      ? colors.on_surface_variant
-                      : colors.on_error_container,
+                        ? colors.on_surface_variant
+                        : colors.on_error_container,
                   fontFamily: typography.labelSmall.fontFamily,
                   fontSize: 11,
                   fontWeight: '700',
@@ -234,6 +234,11 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
         </View>
       ) : sortedTickets.length === 0 ? (
         <View style={styles.centeredContainer}>
+          <PhotoFade
+            source={require('../../assets/photos/my-tickets.jpg')}
+            decorative
+            style={[styles.emptyPhoto, { borderRadius: radius.md, marginBottom: spacing.base }]}
+          />
           <EmptyState
             title={STRINGS.tickets.emptyTicketsTitle}
             message={STRINGS.tickets.emptyTicketsMessage}
@@ -273,6 +278,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+  },
+  emptyPhoto: {
+    width: '100%',
+    maxWidth: 280,
+    height: 160,
+    alignSelf: 'center',
   },
   listContent: {
     width: '100%',

@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Button, EmptyState, QrCodeView, ScreenShell } from '../components';
+import { Button, EmptyState, PhotoFade, QrCodeView, ScreenShell } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { TicketItem } from '../schemas/cinema';
@@ -106,6 +106,13 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Booking Confirmed Photo Header (Task C) */}
+          <PhotoFade
+            source={require('../../assets/photos/booking-confirmed.jpg')}
+            decorative
+            style={[styles.confirmedPhoto, { borderRadius: radius.md, marginBottom: spacing.base }]}
+          />
+
           {/* Main Ticket Card */}
           <View
             style={[
@@ -129,14 +136,14 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
                       ticket.status === 'active'
                         ? colors.secondary_container
                         : ticket.status === 'used'
-                        ? colors.surface_container_highest
-                        : colors.error_container,
+                          ? colors.surface_container_highest
+                          : colors.error_container,
                     borderColor:
                       ticket.status === 'active'
                         ? colors.secondary
                         : ticket.status === 'used'
-                        ? colors.outline
-                        : colors.error,
+                          ? colors.outline
+                          : colors.error,
                     borderRadius: radius.full || 9999,
                     paddingHorizontal: spacing.md,
                     paddingVertical: spacing.xs,
@@ -152,8 +159,8 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
                         ticket.status === 'active'
                           ? colors.on_secondary_container
                           : ticket.status === 'used'
-                          ? colors.on_surface_variant
-                          : colors.on_error_container,
+                            ? colors.on_surface_variant
+                            : colors.on_error_container,
                       fontFamily: typography.labelSmall.fontFamily,
                       fontWeight: '700',
                     },
@@ -162,8 +169,8 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
                   {ticket.status === 'active'
                     ? STRINGS.tickets.activeStatus
                     : ticket.status === 'used'
-                    ? STRINGS.tickets.usedStatus
-                    : STRINGS.tickets.cancelledStatus}
+                      ? STRINGS.tickets.usedStatus
+                      : STRINGS.tickets.cancelledStatus}
                 </Text>
               </View>
 
@@ -347,6 +354,10 @@ const styles = StyleSheet.create({
   ticketCard: {
     width: '100%',
     borderWidth: 1,
+  },
+  confirmedPhoto: {
+    width: '100%',
+    height: 160,
   },
   statusRow: {
     flexDirection: 'row',

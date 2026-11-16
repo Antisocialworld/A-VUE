@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Button, ScreenShell, WelcomeHero } from '../components';
+import { Button, PhotoFade, ScreenShell } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { getVisualCenteringCompensation } from '../constants/heroGeometry';
@@ -30,7 +30,7 @@ export interface WelcomeScreenProps {
  *    - Vertically centered between top safe area and top edge of Sign in button
  *    - ScreenShell top padding overridden with paddingTop: 0
  *    - Upper group contains:
- *      a) HeroContainer: relative wrapper containing WelcomeHero (pointerEvents="none")
+ *      a) HeroContainer: relative wrapper containing PhotoFade (welcome-art.png)
  *         and a sibling transparent overlay Pressable (position: 'absolute', zIndex: 10)
  *      b) Gap (spacing.lg)
  *      c) Tagline (typography.labelLarge, primary 80 in dark, on_surface in light, wrap centered)
@@ -97,11 +97,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         >
           {/* Relative container holding hero art and sibling touch overlay */}
           <View style={styles.heroContainer}>
-            {/* Hero artwork underneath (pointerEvents="none") */}
-            <WelcomeHero
-              width={240}
-              pointerEvents="none"
-              accessibilityLabel={STRINGS.appName}
+            {/* Hero artwork photo */}
+            <PhotoFade
+              source={require('../../assets/photos/welcome-art.png')}
+              decorative
+              resizeMode="contain"
+              style={styles.welcomeArtPhoto}
             />
 
             {/* Sibling transparent Pressable overlay on top */}
@@ -219,6 +220,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  welcomeArtPhoto: {
+    width: 240,
+    height: 144,
   },
   heroOverlayPressable: {
     position: 'absolute',

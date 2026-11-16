@@ -18,4 +18,5 @@ export * from './QrCodeView';
 export * from './SeatMap';
 export * from './TicketIcon';
 export * from './AccountMenu';
+export * from './PhotoFade';
 

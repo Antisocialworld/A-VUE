@@ -259,5 +259,71 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
       expect(formatDeletableDate(undefined)).toBe('the scheduled date');
     });
   });
+
+  // 9. PhotoFade & Photo Placement Contract (Task B & C)
+  describe('PhotoFade & Photo Placement Contract (Task B & C)', () => {
+    const photoFadePath = path.resolve(__dirname, '../components/PhotoFade.tsx');
+    const welcomeScreenPath = path.resolve(__dirname, '../screens/WelcomeScreen.tsx');
+    const appPath = path.resolve(__dirname, '../../App.tsx');
+    const moviesHomePath = path.resolve(__dirname, '../screens/MoviesHomeScreen.tsx');
+    const myTicketsPath = path.resolve(__dirname, '../screens/MyTicketsScreen.tsx');
+    const checkoutPath = path.resolve(__dirname, '../screens/CheckoutScreen.tsx');
+    const waitingRoomPath = path.resolve(__dirname, '../screens/WaitingRoomScreen.tsx');
+    const ticketPath = path.resolve(__dirname, '../screens/TicketScreen.tsx');
+
+    it('PhotoFade component exists and uses Animated.Image and Animated.timing without external animation libs', () => {
+      expect(fs.existsSync(photoFadePath)).toBe(true);
+      const photoFadeSrc = fs.readFileSync(photoFadePath, 'utf-8');
+      expect(photoFadeSrc).toContain('Animated.timing');
+      expect(photoFadeSrc).toContain('Animated.Image');
+      expect(photoFadeSrc).not.toContain('react-native-reanimated');
+      expect(photoFadeSrc).toContain('useNativeDriver: true');
+    });
+
+    it('PhotoFade handles decorative prop to hide decorative images from screen readers', () => {
+      const photoFadeSrc = fs.readFileSync(photoFadePath, 'utf-8');
+      expect(photoFadeSrc).toContain('accessible={!decorative}');
+      expect(photoFadeSrc).toContain('accessibilityElementsHidden={decorative}');
+      expect(photoFadeSrc).toContain("importantForAccessibility={decorative ? 'no' : 'auto'}");
+    });
+
+    it('verifies all 7 photos are placed in their respective screens via PhotoFade', () => {
+      const welcomeSrc = fs.readFileSync(welcomeScreenPath, 'utf-8');
+      const appSrc = fs.readFileSync(appPath, 'utf-8');
+      const moviesHomeSrc = fs.readFileSync(moviesHomePath, 'utf-8');
+      const myTicketsSrc = fs.readFileSync(myTicketsPath, 'utf-8');
+      const checkoutSrc = fs.readFileSync(checkoutPath, 'utf-8');
+      const waitingRoomSrc = fs.readFileSync(waitingRoomPath, 'utf-8');
+      const ticketSrc = fs.readFileSync(ticketPath, 'utf-8');
+
+      // 1. welcome-art.png -> WelcomeScreen
+      expect(welcomeSrc).toContain('PhotoFade');
+      expect(welcomeSrc).toContain("require('../../assets/photos/welcome-art.png')");
+
+      // 2. splash-art.png -> App.tsx (in-app splash)
+      expect(appSrc).toContain('PhotoFade');
+      expect(appSrc).toContain("require('./assets/photos/splash-art.png')");
+
+      // 3. movies-empty.jpg -> MoviesHomeScreen (movies empty state)
+      expect(moviesHomeSrc).toContain('PhotoFade');
+      expect(moviesHomeSrc).toContain("require('../../assets/photos/movies-empty.jpg')");
+
+      // 4. my-tickets.jpg -> MyTicketsScreen (my tickets empty state)
+      expect(myTicketsSrc).toContain('PhotoFade');
+      expect(myTicketsSrc).toContain("require('../../assets/photos/my-tickets.jpg')");
+
+      // 5. checkout.jpg -> CheckoutScreen (checkout header)
+      expect(checkoutSrc).toContain('PhotoFade');
+      expect(checkoutSrc).toContain("require('../../assets/photos/checkout.jpg')");
+
+      // 6. waiting-room.jpg -> WaitingRoomScreen (waiting room header)
+      expect(waitingRoomSrc).toContain('PhotoFade');
+      expect(waitingRoomSrc).toContain("require('../../assets/photos/waiting-room.jpg')");
+
+      // 7. booking-confirmed.jpg -> TicketScreen (booking confirmed screen)
+      expect(ticketSrc).toContain('PhotoFade');
+      expect(ticketSrc).toContain("require('../../assets/photos/booking-confirmed.jpg')");
+    });
+  });
 });
 
