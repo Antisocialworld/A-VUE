@@ -11,28 +11,91 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class ServerBusyError extends Error {
+  readonly statusCode: number = 503;
+  readonly code: string = 'SERVER_BUSY';
+  readonly retryAfter: number = 2;
+  readonly headers: Record<string, string> = {
+    'Retry-After': '2',
+  };
+
+  constructor(message = 'Server is busy. Please try again.') {
+    super(message);
+    this.name = 'ServerBusyError';
+  }
+}
+
 export interface AuthenticatedUser {
   id: string;
   email: string;
   status: 'active' | 'locked';
 }
 
-interface CachedSession {
+export interface CachedSession {
   userId: string;
   userEmail: string;
   userStatus: 'active' | 'locked';
   secretHash: string;
-  cachedAt: number;
-  lastActiveAt: number;
-  expiresAt: number;
+  secret: string;
+  verifiedAt: number;     // Timestamp of last full Argon2 verify (for hard cap)
+  lastAccessedAt: number; // Timestamp of last cache hit (renewed on hit)
+  lastActiveAt: number;   // Timestamp of last activity (for DB idle timeout)
+  expiresAt: number;      // Absolute expiry timestamp
 }
 
-// 60-second in-memory verified secret cache (Rule 02, Design B3)
+// Sliding in-memory cache with hard cap (Rule 02, Design B3, Task 2)
 const verifiedSessionCache = new Map<string, CachedSession>();
+
+export interface InFlightVerify {
+  secret: string;
+  promise: Promise<AuthenticatedUser>;
+}
+
+// In-flight Promise deduplication map: keyed by publicId (never log the key or secret)
+const inFlightVerifies = new Map<string, InFlightVerify>();
+
+/**
+ * Compares two secrets in constant time using crypto.timingSafeEqual (Task A).
+ * Returns false if buffer lengths differ.
+ */
+function constantTimeSecretCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf-8');
+  const bufB = Buffer.from(b, 'utf-8');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 const IDLE_TIMEOUT_MS = env.SESSION_IDLE_TTL_DAYS * 24 * 60 * 60 * 1000;
 const ABSOLUTE_TIMEOUT_MS = env.SESSION_ABSOLUTE_TTL_DAYS * 24 * 60 * 60 * 1000;
-const CACHE_TTL_MS = env.SESSION_CACHE_TTL_SECONDS * 1000;
+const CACHE_IDLE_MS = env.SESSION_CACHE_IDLE_SECONDS * 1000;
+const CACHE_MAX_MS = env.SESSION_CACHE_MAX_SECONDS * 1000;
+
+let activeSessionVerifies = 0;
+
+/**
+ * Bounded concurrency slot acquisition for Argon2 session verify (Task 2d).
+ * Replaces unbounded wait with SESSION_VERIFY_MAX_WAIT_MS.
+ * Yields every 10ms so it never spins without yielding.
+ */
+export async function acquireConcurrencySlot(): Promise<void> {
+  const start = Date.now();
+  const maxWait = env.SESSION_VERIFY_MAX_WAIT_MS;
+
+  while (activeSessionVerifies >= env.ARGON2_MAX_CONCURRENCY) {
+    if (Date.now() - start >= maxWait) {
+      throw new ServerBusyError('Server is busy. Please try again.');
+    }
+    // Yield to the event loop so we never spin without yielding
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  activeSessionVerifies += 1;
+}
+
+export function releaseConcurrencySlot(): void {
+  activeSessionVerifies = Math.max(0, activeSessionVerifies - 1);
+}
 
 export function parseToken(rawToken: string): { publicId: string; secret: string } | null {
   const parts = rawToken.split('.');
@@ -73,7 +136,9 @@ export async function createSession(userId: string): Promise<string> {
       userEmail: user.email,
       userStatus: user.status,
       secretHash,
-      cachedAt: now,
+      secret,
+      verifiedAt: now,
+      lastAccessedAt: now,
       lastActiveAt: now,
       expiresAt: expiresAt.getTime(),
     });
@@ -100,67 +165,40 @@ export async function rotateSession(
 }
 
 /**
- * Revokes a single session (sign out).
+ * Revokes a single session (sign out, deletion, invalidation).
+ * Evicts from both verifiedSessionCache and inFlightVerifies (Task 2b).
  */
 export async function revokeSession(publicId: string): Promise<void> {
   verifiedSessionCache.delete(publicId);
+  inFlightVerifies.delete(publicId);
   await query('DELETE FROM sessions WHERE id = $1;', [publicId]);
 }
 
 /**
  * Revokes all sessions for a user (password change, reset, account delete).
+ * Evicts all matching sessions from verifiedSessionCache and inFlightVerifies (Task 2b).
  */
 export async function revokeAllUserSessions(userId: string): Promise<void> {
   for (const [key, val] of verifiedSessionCache.entries()) {
     if (val.userId === userId) {
       verifiedSessionCache.delete(key);
+      inFlightVerifies.delete(key);
     }
   }
   await query('DELETE FROM sessions WHERE user_id = $1;', [userId]);
 }
 
 /**
- * One gate function getSessionUser() on every protected route.
- * Checks expiry, idle timeout, and user active status.
- * Bad session -> generic failure and row deleted.
+ * Executes a full database query and Argon2 verify on cache miss or hard cap expiry.
  */
-export async function getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser> {
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new UnauthorizedError('Unauthorized');
-  }
-
-  const rawToken = authHeader.slice(7).trim();
-  const parsed = parseToken(rawToken);
-  if (!parsed) {
-    throw new UnauthorizedError('Unauthorized');
-  }
-
-  const { publicId, secret } = parsed;
+async function performFullSessionVerify(
+  request: FastifyRequest,
+  publicId: string,
+  secret: string,
+): Promise<AuthenticatedUser> {
   const now = Date.now();
 
-  // 1. Check in-memory 60s cache
-  const cached = verifiedSessionCache.get(publicId);
-  if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
-    // Check timeouts
-    if (now > cached.expiresAt || now - cached.lastActiveAt > IDLE_TIMEOUT_MS) {
-      await revokeSession(publicId);
-      throw new UnauthorizedError('Unauthorized');
-    }
-    if (cached.userStatus !== 'active') {
-      await revokeSession(publicId);
-      throw new UnauthorizedError('Unauthorized');
-    }
-    // Update last active
-    cached.lastActiveAt = now;
-    return {
-      id: cached.userId,
-      email: cached.userEmail,
-      status: cached.userStatus,
-    };
-  }
-
-  // 2. Query database for session & user
+  // Query database for session & user
   const result = await query<{
     user_id: string;
     secret_hash: string;
@@ -182,7 +220,7 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
     throw new UnauthorizedError('Unauthorized');
   }
 
-  // 3. Verify absolute expiry and idle expiry
+  // Verify absolute expiry, idle expiry and active status
   const expiresAtMs = new Date(row.expires_at).getTime();
   const lastActiveMs = new Date(row.last_active_at).getTime();
 
@@ -191,23 +229,43 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
     throw new UnauthorizedError('Unauthorized');
   }
 
-  // 4. Verify secret hash with Argon2id
-  const isSecretValid = await verifyArgon2id(row.secret_hash, secret);
-  if (!isSecretValid) {
-    await revokeSession(publicId);
-    throw new UnauthorizedError('Unauthorized');
+  // Bounded wait concurrency slot for Argon2 verify (Task 2d)
+  try {
+    await acquireConcurrencySlot();
+    try {
+      const isSecretValid = await verifyArgon2id(row.secret_hash, secret);
+      if (!isSecretValid) {
+        throw new UnauthorizedError('Unauthorized');
+      }
+    } finally {
+      releaseConcurrencySlot();
+    }
+  } catch (err: any) {
+    if (err instanceof ServerBusyError) {
+      // Attach Retry-After header on response if raw response is accessible
+      const rawRes = (request as any)?.raw?.res || (request as any)?.res;
+      if (rawRes && typeof rawRes.setHeader === 'function') {
+        try {
+          rawRes.setHeader('Retry-After', String(err.retryAfter));
+        } catch {}
+      }
+      throw err;
+    }
+    throw err;
   }
 
-  // 5. Update last_active_at in DB
+  // Update last_active_at in DB
   await query('UPDATE sessions SET last_active_at = NOW() WHERE id = $1;', [publicId]);
 
-  // 6. Cache verified secret for 60 seconds
+  // Cache verified session with sliding window and hard cap timestamps (Task 2a & Task D)
   verifiedSessionCache.set(publicId, {
     userId: row.user_id,
     userEmail: row.email,
     userStatus: row.status,
     secretHash: row.secret_hash,
-    cachedAt: now,
+    secret,
+    verifiedAt: now,
+    lastAccessedAt: now,
     lastActiveAt: now,
     expiresAt: expiresAtMs,
   });
@@ -219,3 +277,105 @@ export async function getSessionUser(request: FastifyRequest): Promise<Authentic
   };
 }
 
+/**
+ * One gate function getSessionUser() on every protected route.
+ * Checks sliding cache, deduplicates concurrent verifies, and enforces bounded wait.
+ */
+export async function getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser> {
+  const authHeader = request.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new UnauthorizedError('Unauthorized');
+  }
+
+  const rawToken = authHeader.slice(7).trim();
+  const parsed = parseToken(rawToken);
+  if (!parsed) {
+    throw new UnauthorizedError('Unauthorized');
+  }
+
+  const { publicId, secret } = parsed;
+  const now = Date.now();
+
+  // 1. Check in-memory sliding cache with hard cap (Task 2a & Task D)
+  const cached = verifiedSessionCache.get(publicId);
+  if (
+    cached &&
+    now - cached.lastAccessedAt < CACHE_IDLE_MS &&
+    now - cached.verifiedAt < CACHE_MAX_MS
+  ) {
+    // Task D: Verify secret on every cache hit before any other hit logic
+    if (!constantTimeSecretCompare(cached.secret, secret)) {
+      throw new UnauthorizedError('Unauthorized');
+    }
+
+    // Check timeouts
+    if (now > cached.expiresAt || now - cached.lastActiveAt > IDLE_TIMEOUT_MS) {
+      await revokeSession(publicId);
+      throw new UnauthorizedError('Unauthorized');
+    }
+    if (cached.userStatus !== 'active') {
+      await revokeSession(publicId);
+      throw new UnauthorizedError('Unauthorized');
+    }
+
+    // Sliding renewal: renew idle window and last active on hit
+    cached.lastAccessedAt = now;
+    cached.lastActiveAt = now;
+
+    return {
+      id: cached.userId,
+      email: cached.userEmail,
+      status: cached.userStatus,
+    };
+  }
+
+  // 2. Dedupe concurrent verifies for the same session (Task 2c & Task A)
+  const existingInFlight = inFlightVerifies.get(publicId);
+  if (existingInFlight) {
+    if (constantTimeSecretCompare(existingInFlight.secret, secret)) {
+      return await existingInFlight.promise;
+    }
+    // Secret does not match: do NOT join and do NOT register in inFlightVerifies (Task A).
+    // Run full verify independently (which will query DB, verify with Argon2, fail and throw).
+    return await performFullSessionVerify(request, publicId, secret);
+  }
+
+  const inFlightEntry = {
+    secret,
+  } as InFlightVerify;
+
+  inFlightEntry.promise = (async () => {
+    try {
+      return await performFullSessionVerify(request, publicId, secret);
+    } finally {
+      // Delete the map entry only if the map's current entry is that same object (Task F.a)
+      if (inFlightVerifies.get(publicId) === inFlightEntry) {
+        inFlightVerifies.delete(publicId);
+      }
+    }
+  })();
+
+  inFlightVerifies.set(publicId, inFlightEntry);
+  return await inFlightEntry.promise;
+}
+
+/**
+ * Inspection and reset helpers for unit tests.
+ */
+export function _getVerifiedSessionCache(): Map<string, CachedSession> {
+  return verifiedSessionCache;
+}
+
+export function _getInFlightVerifies(): Map<string, InFlightVerify> {
+  return inFlightVerifies;
+}
+
+export function _getActiveSessionVerifies(): number {
+  return activeSessionVerifies;
+}
+
+export function _resetSessionCache(): void {
+  verifiedSessionCache.clear();
+  inFlightVerifies.clear();
+  activeSessionVerifies = 0;
+}

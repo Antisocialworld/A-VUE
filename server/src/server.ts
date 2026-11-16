@@ -68,6 +68,19 @@ export async function buildServer(): Promise<FastifyInstance> {
       err: error.message,
     });
 
+    // Clear 503 for SERVER_BUSY: custom message and Retry-After header (Task B)
+    if (statusCode === 503 && error.code === 'SERVER_BUSY') {
+      const retryAfter = error.retryAfter ?? error.headers?.['Retry-After'] ?? 2;
+      reply.header('Retry-After', String(retryAfter));
+      return reply.status(503).send({
+        error: {
+          code: 'SERVER_BUSY',
+          message: error.message,
+          requestId: request.id,
+        },
+      });
+    }
+
     const isClientError = statusCode < 500;
     const message = isClientError ? error.message : 'An internal server error occurred.';
     const code = error.code || (isClientError ? 'BAD_REQUEST' : 'INTERNAL_SERVER_ERROR');

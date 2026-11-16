@@ -16,6 +16,9 @@ describe('Server Environment Validation (Rule 02)', () => {
     expect(env.REDIS_URL).toBe(validBaseEnv.REDIS_URL);
     expect(env.BODY_LIMIT_KB).toBe(100);
     expect(env.REQUEST_TIMEOUT_MS).toBe(10000);
+    expect(env.SESSION_CACHE_IDLE_SECONDS).toBe(60);
+    expect(env.SESSION_CACHE_MAX_SECONDS).toBe(300);
+    expect(env.SESSION_VERIFY_MAX_WAIT_MS).toBe(2000);
   });
 
   it('fails fast and reports KEY NAMES ONLY when required variables are missing', () => {
