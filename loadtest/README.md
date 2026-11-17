@@ -27,6 +27,10 @@ Before starting the backend API server, set the hold rate-limit overrides direct
 # Set in the API server window BEFORE running npm run dev:
 $env:RATE_LIMIT_HOLD_USER = "100000"
 $env:RATE_LIMIT_HOLD_IP = "100000"
+$env:RATE_LIMIT_AUTH_IP = "100000"  # needed for the warm-up: GET /auth/me allows 30 per minute per IP by default
+
+# Optional: for the waiting-room demo, shorten slot TTL (default 90 s):
+# $env:WAITING_ROOM_SLOT_SECONDS = "20"
 
 # Note: GET /showtimes/:id/waiting-room has no rate limiter attached, so no waiting room override is required.
 # Start the server in that same terminal:
@@ -73,7 +77,11 @@ k6 run -e LOADTEST_TOKENS_FILE=$env:LOADTEST_TOKENS_FILE -e SHOWTIME_ID=$env:SHO
 ```
 
 #### Cold versus warm run
-Set `$env:WARM_UP="1"` before running k6 for the warm run. Leave it unset for the cold run. The comparison results are not yet recorded.
+Set `$env:WARM_UP="1"` before running k6 for the warm run. Leave it unset for the cold run.
+
+#### Optional flags
+- `$env:IDLE_AFTER_CONFLICT_SECONDS="<seconds>"` — pause each VU this many seconds after a 409 seat conflict (default 0, which keeps the original 0.5 s sleep). For the waiting-room demo, set this **longer** than `WAITING_ROOM_SLOT_SECONDS` so idle users' slots expire and queued users get admitted.
+- `$env:WAITING_ROOM_SLOT_SECONDS="<seconds>"` — set in the **API server window** (not k6) to shorten the waiting-room slot TTL (default 90 s). See Run 3 below.
 
 ### Step 5: Verify System State Post-Run
 Run the verification script from the `server` directory so it accurately discovers `server/.env` (running from the root fails because `.env` is located inside `server/`):
@@ -107,17 +115,79 @@ Remove-Item -Path $env:LOADTEST_TOKENS_FILE -ErrorAction SilentlyContinue
 
 ## 3. Results
 
-- **Run**: 500 VUs, 30 s ramp, 90 s hold, 15 s ramp down, against one 50-seat showtime.
-- **Verified**: 50 of 50 seats held, 0 duplicate holds, 0 database double-bookings, waiting-room active set at 300 of limit 300.
-- **k6 counters**: tokens_loaded 500, holds_ok 104, seat_conflicts 28766, waiting_room_hits 128, waiting_room_admitted 1, rate_limited 0, network_errors 31953 (all EOF). The k6 threshold on network_errors failed.
+Common setup: 500 VUs, 30 s ramp, 90 s sustain, 15 s ramp-down, one 50-seat showtime. Hold and auth rate limits raised through `$env:` in the API window only (never in `.env`). Sessions pre-minted; Argon2id seed.
+
+### Run 1 — Cold (API restarted, empty session cache)
+
+| Counter | Value |
+|---------|------:|
+| tokens_loaded | 500 |
+| warm_ok / warm_failed | 0 / 0 |
+| holds_ok | 141 |
+| seat_conflicts | 48 310 |
+| waiting_room_hits | 200 |
+| waiting_room_admitted | 0 |
+| waiting_room_timeouts | 0 |
+| rate_limited | 0 |
+| server_busy | 3 603 |
+| server_errors | 0 |
+| network_errors | 0 |
+| iterations | 52 054 complete, 200 interrupted |
+
+No threshold crossed.
+
+### Run 2 — Warm (`WARM_UP=1`; warm-up 46 s for 500 sessions, ≈10.9/s)
+
+| Counter | Value |
+|---------|------:|
+| warm_ok / warm_failed | 500 / 0 |
+| holds_ok | 167 |
+| seat_conflicts | 68 484 |
+| waiting_room_hits | 200 |
+| waiting_room_admitted | 0 |
+| waiting_room_timeouts | 195 |
+| rate_limited | 0 |
+| server_busy | 0 |
+| server_errors | 0 |
+| network_errors | 0 |
+| iterations | 68 846 complete, 5 interrupted |
+
+No threshold crossed.
+
+### Run 3 — Waiting-room demo (warm; API `WAITING_ROOM_SLOT_SECONDS=20`; k6 `IDLE_AFTER_CONFLICT_SECONDS=25`)
+
+| Counter | Value |
+|---------|------:|
+| holds_ok | 41 |
+| seat_conflicts | 1 950 |
+| waiting_room_hits | 1 651 |
+| waiting_room_admitted | 1 651 |
+| waiting_room_timeouts | 0 |
+| rate_limited | 0 |
+| server_busy | 0 |
+| server_errors | 0 |
+| network_errors | 0 |
+| iterations | 1 904 complete, 87 interrupted |
+
+No threshold crossed.
+
+### Verification (taken right after each run)
+
+All three runs PASS: 50 active holds, 50 of 50 seats, 0 duplicate holds, 0 database double-bookings. Waiting-room active: 300 of 300 (Runs 1–2), 299 of 300 (Run 3). 0 bookings were confirmed, so the database unique constraint was not exercised.
 
 ---
 
-## 4. Known Limits
+## 4. Notes
 
-- EOF cause is not confirmed. Leading hypothesis: cold in-memory session cache, so many Argon2id verifies queue behind ARGON2_MAX_CONCURRENCY=4 and requests stall past the 10 s connectionTimeout. Marked as a hypothesis.
-- Measured on this machine (server/scripts/loadtest-argon2-timing.ts): Argon2id verify takes about 104 ms median (p95 about 119 ms), and throughput is about 11 to 12 verifies per second at concurrency 4 and 8. During the 30 s ramp about 16.7 new sessions per second arrive. These are measured numbers. The conclusion that this causes the EOFs is inferred.
-- The session cache TTL is absolute at 60 s and a cache hit does not extend it (session.ts), so a warmed cache expires 60 s after warming.
-- Only 1 queued user was admitted. Inferred: slots refresh while losing users keep retrying. Not verified.
-- Sign-in surge of about 8 per second drops connections.
-- The per-user hold limit (default 10 per minute) was raised for the test through $env: variables set in the API window before npm run dev. They are never put in .env.
+- **Measured:** `server_busy` = 503 SERVER_BUSY (designed bounded-wait response with `Retry-After`). Cold run: no dropped connections, no other 5xx.
+- **Measured:** Argon2id verify ≈104 ms median, ≈11–12 verifies/s at concurrency 4 and 8.
+- **Inferred:** the 503s in the cold run come from the cold session cache (500 first-time Argon2id verifies); the cause is not isolated between sliding cache, bounded wait and counter fix.
+- **Inferred:** `holds_ok` counts requests, not seats (one hold request can cover up to 6 seats); do not read it as a seat count.
+- **Inferred:** waiting-room counters are events, not unique users.
+- **From code:** waiting-room slots are sliding (every hold request refreshes an active user's slot), so users who keep retrying never free a slot; Runs 1–2 therefore admit no one. Run 3 shows admission when users idle past the slot time.
+- **From code:** session cache is sliding (idle 60 s, hard cap 300 s) and per server instance; on serverless an eviction on one instance does not reach others.
+- **Not tested:** more than one showtime, multi-instance, non-local network, confirmed bookings, the app's retry UX for SERVER_BUSY.
+
+### Earlier runs
+
+Runs before the session-hardening and counter fix used a network-error counter that also counted 409/429 responses, so their `network_errors` figures are not valid and are not cited here. Seat-safety checks in those runs passed.

@@ -45,11 +45,15 @@ http.setResponseCallback(http.expectedStatuses(200, 201, 204, 409, 429));
 // Task 1: Warm-up switch
 const isWarmUp = __ENV.WARM_UP === '1';
 
+// Task 2: Optional idle after conflict (default 0)
+const idleAfterConflictSeconds = Number(__ENV.IDLE_AFTER_CONFLICT_SECONDS) || 0;
+
 // Custom Metrics (Task B Requirements)
 const tokensLoaded = new Counter('tokens_loaded');
 const warmOk = new Counter('warm_ok');
 const warmFailed = new Counter('warm_failed');
 const rateLimited = new Counter('rate_limited');
+const serverBusy = new Counter('server_busy');
 const networkErrors = new Counter('network_errors');
 
 const holdsOk = new Counter('holds_ok');
@@ -85,11 +89,29 @@ let vuSeatIds = null;
 
 /**
  * Helper to record network-level failures (status 0, connection drops, EOF, timeout).
+ * Counts ONLY status === 0 or non-empty error string (Task 1a).
  */
 function recordNetworkErrorIfNeeded(res) {
-  if (res.status === 0 || res.error || res.error_code) {
+  if (res.status === 0 || (res.error && res.error !== '')) {
     networkErrors.add(1);
     return true;
+  }
+  return false;
+}
+
+/**
+ * Helper to detect designed 503 SERVER_BUSY response (Task 1b).
+ */
+function isServerBusy(res) {
+  if (res.status === 503) {
+    try {
+      const body = res.json();
+      if (body && body.error && body.error.code === 'SERVER_BUSY') {
+        return true;
+      }
+    } catch (e) {
+      // Non-JSON 503
+    }
   }
   return false;
 }
@@ -203,11 +225,16 @@ export default function (data) {
         },
       });
 
-      recordNetworkErrorIfNeeded(seatRes);
+      const seatNetErr = recordNetworkErrorIfNeeded(seatRes);
 
       if (seatRes.status >= 500) {
-        serverErrors.add(1);
-      } else {
+        if (isServerBusy(seatRes)) {
+          serverBusy.add(1);
+          serverErrors.add(0);
+        } else {
+          serverErrors.add(1);
+        }
+      } else if (!seatNetErr) {
         serverErrors.add(0);
       }
 
@@ -261,7 +288,12 @@ export default function (data) {
   const holdNetErr = recordNetworkErrorIfNeeded(holdRes);
 
   if (holdRes.status >= 500) {
-    serverErrors.add(1);
+    if (isServerBusy(holdRes)) {
+      serverBusy.add(1);
+      serverErrors.add(0);
+    } else {
+      serverErrors.add(1);
+    }
     sleep(1);
     return;
   } else if (!holdNetErr) {
@@ -277,7 +309,11 @@ export default function (data) {
 
   if (holdRes.status === 409) {
     seatConflicts.add(1);
-    sleep(0.5); // Clean conflict, retry quickly
+    if (idleAfterConflictSeconds > 0) {
+      sleep(idleAfterConflictSeconds);
+    } else {
+      sleep(0.5); // Clean conflict, retry quickly
+    }
     return;
   }
 
@@ -313,7 +349,12 @@ export default function (data) {
         const pollNetErr = recordNetworkErrorIfNeeded(pollRes);
 
         if (pollRes.status >= 500) {
-          serverErrors.add(1);
+          if (isServerBusy(pollRes)) {
+            serverBusy.add(1);
+            serverErrors.add(0);
+          } else {
+            serverErrors.add(1);
+          }
         } else if (!pollNetErr) {
           serverErrors.add(0);
         }
@@ -356,7 +397,12 @@ export default function (data) {
         const retryNetErr = recordNetworkErrorIfNeeded(retryRes);
 
         if (retryRes.status >= 500) {
-          serverErrors.add(1);
+          if (isServerBusy(retryRes)) {
+            serverBusy.add(1);
+            serverErrors.add(0);
+          } else {
+            serverErrors.add(1);
+          }
         } else if (!retryNetErr) {
           serverErrors.add(0);
         }
@@ -365,6 +411,9 @@ export default function (data) {
           holdsOk.add(1);
         } else if (retryRes.status === 409) {
           seatConflicts.add(1);
+          if (idleAfterConflictSeconds > 0) {
+            sleep(idleAfterConflictSeconds);
+          }
         } else if (retryRes.status === 429) {
           try {
             const rb = retryRes.json();
@@ -403,6 +452,13 @@ export function handleSummary(data) {
     return 0;
   };
 
+  const getMetricPasses = (name) => {
+    if (data && data.metrics && data.metrics[name] && data.metrics[name].values) {
+      return data.metrics[name].values.passes || 0;
+    }
+    return 0;
+  };
+
   const tokensLoadedCount = getMetricCount('tokens_loaded');
   const warmOkCount = getMetricCount('warm_ok');
   const warmFailedCount = getMetricCount('warm_failed');
@@ -412,6 +468,8 @@ export function handleSummary(data) {
   const wrAdmittedCount = getMetricCount('waiting_room_admitted');
   const wrTimeoutsCount = getMetricCount('waiting_room_timeouts');
   const rateLimitedCount = getMetricCount('rate_limited');
+  const serverBusyCount = getMetricCount('server_busy');
+  const serverErrorsCount = getMetricPasses('server_errors');
   const networkErrorsCount = getMetricCount('network_errors');
 
   const summary = [
@@ -428,6 +486,8 @@ export function handleSummary(data) {
     `  waiting_room_admitted:  ${wrAdmittedCount}`,
     `  waiting_room_timeouts:  ${wrTimeoutsCount}`,
     `  rate_limited:           ${rateLimitedCount}`,
+    `  server_busy:            ${serverBusyCount}`,
+    `  server_errors:          ${serverErrorsCount}`,
     `  network_errors:         ${networkErrorsCount}`,
     '================================================================================',
     '',
