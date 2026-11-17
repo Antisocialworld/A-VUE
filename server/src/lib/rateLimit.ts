@@ -209,3 +209,13 @@ export async function searchRateLimit(request: FastifyRequest, reply: FastifyRep
   });
 }
 
+export async function onDemandRateLimit(request: FastifyRequest, reply: FastifyReply, userId?: string): Promise<boolean> {
+  return checkDualRateLimit(request, reply, {
+    category: 'ondemand',
+    userId,
+    userLimit: env.RATE_LIMIT_ONDEMAND_USER,
+    ipLimit: env.RATE_LIMIT_ONDEMAND_IP,
+    actionDescription: 'on-demand showtime scheduling',
+  });
+}
+

@@ -93,4 +93,40 @@ describe('Database Migrations & Ledger Schema Audit (Rule 03)', () => {
       expect(sql).toContain('qr_hash TEXT UNIQUE NOT NULL');
     });
   });
+
+  describe('Migration 006: On-Demand Showtimes (Task 1)', () => {
+    const migration006Path = path.join(migrationsDir, '006_showtimes_on_demand.sql');
+
+    it('migration 006 file exists, is forward-only, and contains no DROP or DELETE', () => {
+      expect(fs.existsSync(migration006Path)).toBe(true);
+      const sql = fs.readFileSync(migration006Path, 'utf-8');
+      expect(sql).toContain("INSERT INTO migrations_ledger (filename)");
+      expect(sql).toContain("'006_showtimes_on_demand.sql'");
+      expect(sql).not.toMatch(/\bDROP\b/i);
+      expect(sql).not.toMatch(/\bDELETE\b/i);
+    });
+
+    it('contains CHECK constraint on source column (seed | on_demand)', () => {
+      const sql = fs.readFileSync(migration006Path, 'utf-8');
+      expect(sql).toContain("source TEXT NOT NULL DEFAULT 'seed'");
+      expect(sql).toContain("CHECK (source IN ('seed', 'on_demand'))");
+    });
+
+    it('contains UNIQUE index on (screen_id, starts_at)', () => {
+      const sql = fs.readFileSync(migration006Path, 'utf-8');
+      expect(sql).toContain('CREATE UNIQUE INDEX IF NOT EXISTS');
+      expect(sql).toContain('(screen_id, starts_at)');
+    });
+
+    it('adds created_at only if missing', () => {
+      const sql = fs.readFileSync(migration006Path, 'utf-8');
+      expect(sql).toContain('ALTER TABLE showtimes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ');
+    });
+
+    it('includes pre-flight duplicate check query in comments', () => {
+      const sql = fs.readFileSync(migration006Path, 'utf-8');
+      expect(sql).toContain('SELECT screen_id, starts_at');
+      expect(sql).toContain('HAVING COUNT(*) > 1');
+    });
+  });
 });

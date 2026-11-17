@@ -68,6 +68,14 @@ const envSchema = z.object({
   SERVICE_FEE_BPS: z.coerce.number().default(500),
   CRON_SECRET: z.string().optional(),
 
+  // On-Demand Showtimes Constants
+  ON_DEMAND_DAYS: z.coerce.number().default(7),
+  ON_DEMAND_MIN_LEAD_MINUTES: z.coerce.number().default(60),
+  ON_DEMAND_SLOTS_PER_MOVIE_PER_DAY: z.coerce.number().default(2),
+  ON_DEMAND_MAX_SHOWTIMES_PER_MOVIE: z.coerce.number().default(30),
+  ON_DEMAND_MAX_NEW_MOVIES_PER_DAY: z.coerce.number().default(25),
+  ON_DEMAND_MAX_ACTIVE_SHOWTIMES: z.coerce.number().default(1000),
+
   // Rate Limits
   RATE_LIMIT_HOLD_USER: z.coerce.number().default(10),
   RATE_LIMIT_HOLD_IP: z.coerce.number().default(120),
@@ -76,6 +84,8 @@ const envSchema = z.object({
   RATE_LIMIT_SEARCH_USER: z.coerce.number().default(30),
   RATE_LIMIT_SEARCH_IP: z.coerce.number().default(30),
   RATE_LIMIT_AUTH_IP: z.coerce.number().default(30),
+  RATE_LIMIT_ONDEMAND_USER: z.coerce.number().default(5),
+  RATE_LIMIT_ONDEMAND_IP: z.coerce.number().default(20),
 
   // Search Constants
   SEARCH_CACHE_TTL_SECONDS: z.coerce.number().default(600),
