@@ -2,8 +2,10 @@ import {
   MovieDetailResponse,
   MovieDto,
   MoviesListResponse,
+  MoviesSearchResponse,
   movieDetailResponseSchema,
   moviesListResponseSchema,
+  moviesSearchResponseSchema,
 } from '../schemas/movies';
 import { STRINGS } from '../constants/strings';
 import { getSessionToken } from '../lib/secureStore';
@@ -116,6 +118,17 @@ export class MoviesClient {
     });
     const parsed = movieDetailResponseSchema.parse(data);
     return parsed.movie;
+  }
+
+  /**
+   * Searches movies with typo-tolerant ranking
+   */
+  public async searchMovies(query: string): Promise<MoviesSearchResponse> {
+    const encoded = encodeURIComponent(query);
+    const data = await this.request<any>(`/movies/search?q=${encoded}`, {
+      method: 'GET',
+    });
+    return moviesSearchResponseSchema.parse(data);
   }
 }
 

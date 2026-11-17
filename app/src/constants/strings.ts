@@ -171,6 +171,9 @@ export const STRINGS = {
 
   movies: {
     header: 'Movies',
+    ticketsPill: 'Tickets',
+    searchActionAccessibilityLabel: 'Search movies',
+    searchActionAccessibilityHint: 'Opens movie search',
     emptyStateTitle: 'No Movies Scheduled',
     emptyStateMessage: 'There are currently no movies or showtimes available. Please check back soon.',
     signOutAction: 'Sign out',
@@ -185,6 +188,17 @@ export const STRINGS = {
     ratingLabel: (rating: number) => `${rating.toFixed(1)}/10`,
     noPoster: 'No poster available',
     tba: 'TBA',
+  },
+
+  search: {
+    header: 'Search',
+    placeholder: 'Search movies…',
+    inputAccessibilityLabel: 'Search movies by title',
+    clearAccessibilityLabel: 'Clear search',
+    backAccessibilityLabel: 'Back to movies',
+    noResultsTitle: 'No Movies Found',
+    noResultsMessage: 'No movies matched your search. Try checking for typos or searching another title.',
+    minCharsHint: 'Type at least 2 characters to search',
   },
 
   movieDetail: {
@@ -223,7 +237,14 @@ export const STRINGS = {
     soldLegend: 'Sold',
     wheelchairLegend: 'Wheelchair',
     maxSeatsReached: 'You can select up to 6 seats per booking.',
-    seatDeselectedToast: (seatLabel: string) => `${seatLabel} is no longer available and was deselected.`,
+    seatsDeselectedToast: (seatLabels: string[]) => {
+      if (seatLabels.length === 1) {
+        return `Seat ${seatLabels[0]} is no longer available and was deselected.`;
+      }
+      const allButLast = seatLabels.slice(0, -1).join(', ');
+      const last = seatLabels[seatLabels.length - 1];
+      return `Seats ${allButLast} and ${last} are no longer available and were deselected.`;
+    },
     conflictToast: 'One or more selected seats were taken by another user.',
     serviceUnavailableToast: 'Seat hold service temporarily unavailable. Please retry.',
     proceedToCheckout: 'Proceed to checkout',

@@ -14,6 +14,7 @@ import {
   MovieCard,
   MoviesEmptyState,
   ScreenShell,
+  SearchIcon,
   Skeleton,
   TicketIcon,
   TmdbAttribution,
@@ -44,12 +45,14 @@ export interface MoviesHomeScreenProps {
   onSignOut: () => void;
   onSelectMovie: MovieSelectHandler;
   onNavigateToTickets?: () => void;
+  onOpenSearch?: () => void;
 }
 
 export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   onSignOut,
   onSelectMovie,
   onNavigateToTickets,
+  onOpenSearch,
 }) => {
   const { spacing, colors, typography, mode, radius } = useTheme();
 
@@ -62,19 +65,39 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   const [error, setError] = useState<unknown | null>(null);
 
   const headerRight = (
-    <View style={[styles.headerRightContainer, { gap: spacing.sm }]}>
+    <View style={styles.headerRightContainer}>
+      {onOpenSearch && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={STRINGS.movies.searchActionAccessibilityLabel}
+          accessibilityHint={STRINGS.movies.searchActionAccessibilityHint}
+          onPress={onOpenSearch}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          style={({ pressed }) => [
+            styles.searchButton,
+            {
+              backgroundColor: colors.surface_container_high,
+              borderColor: colors.outline_variant,
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <SearchIcon size={18} color={colors.on_surface_variant} />
+        </Pressable>
+      )}
       {onNavigateToTickets && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={STRINGS.tickets.myTicketsHeader}
           accessibilityHint="Navigates to your booked tickets"
           onPress={onNavigateToTickets}
+          hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
           style={({ pressed }) => [
             styles.myTicketsPill,
             {
               backgroundColor: pressed ? colors.primary_text_high : colors.primary,
               borderRadius: radius.full,
-              paddingHorizontal: spacing.md,
+              paddingHorizontal: spacing.sm,
             },
           ]}
         >
@@ -82,6 +105,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
           <Text
             allowFontScaling
             numberOfLines={1}
+            ellipsizeMode="tail"
             style={[
               styles.myTicketsText,
               {
@@ -93,7 +117,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
               },
             ]}
           >
-            {STRINGS.tickets.myTicketsHeader}
+            {STRINGS.movies.ticketsPill}
           </Text>
         </Pressable>
       )}
@@ -285,10 +309,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 0,
+    flexWrap: 'nowrap',
+    gap: 10,
+  },
+  searchButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   myTicketsPill: {
-    height: 44,
-    minHeight: 44,
+    height: 36,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -311,6 +346,9 @@ const styles = StyleSheet.create({
   },
   cardWrapper: {
     flex: 1,
+    flexGrow: 0,
+    flexBasis: '48%',
+    maxWidth: '50%',
     marginBottom: 12,
   },
   gridContainer: {

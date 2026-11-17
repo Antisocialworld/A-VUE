@@ -74,8 +74,11 @@ const envSchema = z.object({
   RATE_LIMIT_CHECKOUT_USER: z.coerce.number().default(5),
   RATE_LIMIT_CHECKOUT_IP: z.coerce.number().default(20),
   RATE_LIMIT_SEARCH_USER: z.coerce.number().default(30),
-  RATE_LIMIT_SEARCH_IP: z.coerce.number().default(120),
+  RATE_LIMIT_SEARCH_IP: z.coerce.number().default(30),
   RATE_LIMIT_AUTH_IP: z.coerce.number().default(30),
+
+  // Search Constants
+  SEARCH_CACHE_TTL_SECONDS: z.coerce.number().default(600),
 
   // Third Parties
   TMDB_API_TOKEN: z.string().optional(),
@@ -212,6 +215,9 @@ function validateEnv(sourceEnv: Record<string, string | undefined>): Env {
 export const env = validateEnv(process.env);
 export function getTmdbToken(): string | undefined {
   return env.TMDB_API_TOKEN || env.TMDB_ACCESS_TOKEN;
+}
+export function getSearchCacheTtlSeconds(): number {
+  return env.SEARCH_CACHE_TTL_SECONDS;
 }
 export function getAdminEmails(): string[] {
   const raw = env.ADMIN_EMAILS || process.env.ADMIN_EMAILS || '';

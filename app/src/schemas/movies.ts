@@ -75,3 +75,14 @@ export const posterParamsSchema = z
 
 export type PosterParams = z.infer<typeof posterParamsSchema>;
 
+// Movies Search Response Schema
+export const moviesSearchResponseSchema = z
+  .object({
+    movies: z.array(movieDtoSchema),
+    totalResults: z.number().int().nonnegative(),
+    stale: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type MoviesSearchResponse = z.infer<typeof moviesSearchResponseSchema>;
+

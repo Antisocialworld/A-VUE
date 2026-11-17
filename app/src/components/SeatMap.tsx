@@ -99,10 +99,8 @@ export const SeatMap: React.FC<SeatMapProps> = ({
             }
 
             if (newlyUnavailableSeats.length > 0) {
-              const label = newlyUnavailableSeats
-                .map((s) => `Row ${s.row}-${s.number}`)
-                .join(', ');
-              onToast(STRINGS.seatMap.seatDeselectedToast(label));
+              const labels = newlyUnavailableSeats.map((s) => `${s.row}-${s.number}`);
+              onToast(STRINGS.seatMap.seatsDeselectedToast(labels));
 
               const remainingSeats = newSeats.filter((s) =>
                 remainingSelectedIds.includes(s.id)

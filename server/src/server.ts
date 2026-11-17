@@ -11,18 +11,27 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { cronRoutes } from './routes/cron.js';
 
+export function serializeRequest(req: { id?: string; method?: string; url?: string }): {
+  id?: string;
+  method?: string;
+  url: string;
+} {
+  const rawUrl = req.url || '';
+  const queryIdx = rawUrl.indexOf('?');
+  const cleanUrl = queryIdx !== -1 ? rawUrl.slice(0, queryIdx) : rawUrl;
+  return {
+    id: req.id,
+    method: req.method,
+    url: cleanUrl,
+  };
+}
+
 export async function buildServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
     logger: {
       level: env.NODE_ENV === 'test' ? 'silent' : 'info',
       serializers: {
-        req(req) {
-          return {
-            id: req.id,
-            method: req.method,
-            url: req.url,
-          };
-        },
+        req: serializeRequest,
       },
     },
     genReqId() {

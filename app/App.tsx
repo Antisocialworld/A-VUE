@@ -16,6 +16,7 @@ import { WaitingRoomScreen } from './src/screens/WaitingRoomScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
+import { SearchScreen } from './src/screens/SearchScreen';
 import { Button, PhotoFade } from './src/components';
 import { STRINGS, formatDeletableDate } from './src/constants/strings';
 import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
@@ -29,6 +30,7 @@ type ScreenRoute =
   | 'reset_password'
   | 'gallery'
   | 'movies'
+  | 'search'
   | 'movie_detail'
   | 'showtimes'
   | 'seat_map'
@@ -153,6 +155,7 @@ const MainNavigator: React.FC = () => {
     return (
       <MoviesHomeScreen
         onSignOut={handleSignOut}
+        onOpenSearch={() => setCurrentRoute('search')}
         onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
           if (typeof movieOrId === 'object' && movieOrId !== null) {
             setSelectedMovieId(movieOrId.movieId);
@@ -170,6 +173,30 @@ const MainNavigator: React.FC = () => {
           setCurrentRoute('movie_detail');
         }}
         onNavigateToTickets={() => setCurrentRoute('my_tickets')}
+      />
+    );
+  }
+
+  if (currentRoute === 'search') {
+    return (
+      <SearchScreen
+        onBack={() => setCurrentRoute('movies')}
+        onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
+          if (typeof movieOrId === 'object' && movieOrId !== null) {
+            setSelectedMovieId(movieOrId.movieId);
+            setSelectedMovieTitle(movieOrId.movieTitle || '');
+            setSelectedMoviePosterUrl(movieOrId.posterUrl);
+            setSelectedMovieReleaseYear(movieOrId.releaseYear);
+            setSelectedMovieVoteAverage(movieOrId.voteAverage);
+          } else {
+            setSelectedMovieId(movieOrId);
+            if (movieTitle) setSelectedMovieTitle(movieTitle);
+            setSelectedMoviePosterUrl(posterUrl);
+            setSelectedMovieReleaseYear(releaseYear);
+            setSelectedMovieVoteAverage(voteAverage);
+          }
+          setCurrentRoute('movie_detail');
+        }}
       />
     );
   }

@@ -144,7 +144,7 @@ export function mapTmdbDetailToDto(raw: z.infer<typeof rawTmdbMovieDetailSchema>
 /**
  * Safe Redis JSON get helper.
  */
-async function getCachedJson<T>(key: string): Promise<T | null> {
+export async function getCachedJson<T>(key: string): Promise<T | null> {
   try {
     const redis = getRedisClient();
     if (redis.status !== 'ready') {
@@ -160,7 +160,7 @@ async function getCachedJson<T>(key: string): Promise<T | null> {
 /**
  * Safe Redis JSON set helper.
  */
-async function setCachedJson(key: string, data: any, ttlSeconds: number): Promise<void> {
+export async function setCachedJson(key: string, data: any, ttlSeconds: number): Promise<void> {
   try {
     const redis = getRedisClient();
     if (redis.status !== 'ready') {
@@ -372,4 +372,28 @@ export async function getMovieDetails(id: number): Promise<{ movie: MovieDto; st
       throw new Error('TMDB_UNAVAILABLE');
     }
   });
+}
+
+/**
+ * Direct upstream TMDB movie search.
+ * Only this adapter knows TMDB's raw data shape (Rule 05).
+ * Query text is encoded for the URL query param; never printed or logged.
+ */
+export async function searchTmdbMovies(normalizedQ: string): Promise<MovieDto[]> {
+  const token = getTmdbToken();
+  if (!token) {
+    throw new Error('TMDB_TOKEN_MISSING');
+  }
+
+  const encodedQuery = encodeURIComponent(normalizedQ);
+  const url = `${TMDB_BASE_URL}/search/movie?language=en-US&query=${encodedQuery}&page=1`;
+
+  const response = await fetchWithRetryAndBackoff(url, token);
+  if (!response.ok) {
+    throw new Error(`TMDB upstream search error: ${response.status}`);
+  }
+
+  const rawJson = await response.json();
+  const parsed = rawTmdbNowPlayingResponseSchema.parse(rawJson);
+  return parsed.results.map(mapTmdbItemToDto);
 }

@@ -2,7 +2,8 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getTmdbToken } from '../env.js';
 import { getSessionUser } from '../lib/session.js';
 import { getMovieDetails, getNowPlayingMovies } from '../lib/tmdb.js';
-import { posterRateLimit } from '../lib/rateLimit.js';
+import { posterRateLimit, searchRateLimit } from '../lib/rateLimit.js';
+import { normalizeSearchText, searchMovies } from '../lib/search.js';
 import {
   movieDetailParamsSchema,
   moviesListQuerySchema,
@@ -74,7 +75,79 @@ export async function movieRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  // 2. GET /movies/:id — Authenticated movie details
+  // 2. GET /movies/search?q= — Authenticated typo-tolerant search
+  // Rate limited per user and per IP; results cached in Redis via SHA-256 key; query text NEVER logged
+  fastify.get(
+    '/movies/search',
+    { preHandler: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      let user;
+      try {
+        user = await getSessionUser(request);
+      } catch {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required to access movie endpoints.',
+            requestId: request.id,
+          },
+        });
+      }
+
+      const allowed = await searchRateLimit(request, reply, user.id);
+      if (!allowed) return;
+
+      // Token check: if missing, return 503 generic message without leaking token name
+      if (!getTmdbToken()) {
+        return reply.status(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Movie service is temporarily unavailable. Please try again later.',
+            requestId: request.id,
+          },
+        });
+      }
+
+      const rawQ = (request.query as Record<string, unknown> | undefined)?.q;
+      if (typeof rawQ !== 'string') {
+        return reply.status(400).send({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Search query must be between 2 and 80 characters.',
+            requestId: request.id,
+          },
+        });
+      }
+
+      const normalizedQ = normalizeSearchText(rawQ);
+      if (normalizedQ.length < 2 || normalizedQ.length > 80) {
+        return reply.status(400).send({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Search query must be between 2 and 80 characters.',
+            requestId: request.id,
+          },
+        });
+      }
+
+      try {
+        const result = await searchMovies(normalizedQ);
+        return reply.status(200).send(result);
+      } catch (err: any) {
+        // Privacy rule: query text is NEVER logged or echoed in errors
+        request.log.error({ requestId: request.id }, 'Movie search request failed');
+        return reply.status(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Movie service is temporarily unavailable. Please try again later.',
+            requestId: request.id,
+          },
+        });
+      }
+    },
+  );
+
+  // 3. GET /movies/:id — Authenticated movie details
   fastify.get(
     '/movies/:id',
     { preHandler: [requireAuth] },

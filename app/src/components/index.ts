@@ -20,4 +20,5 @@ export * from './TicketIcon';
 export * from './AccountMenu';
 export * from './PhotoFade';
 export * from './MoviesEmptyState';
+export * from './SearchIcon';
 

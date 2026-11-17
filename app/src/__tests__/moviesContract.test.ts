@@ -230,11 +230,14 @@ describe('MoviesHomeScreen Header Restyle — Option B (Task 1)', () => {
     expect(homeSource).toContain('accessibilityLabel={STRINGS.tickets.myTicketsHeader}');
   });
 
-  it('header renders AccountMenu with onSignOut and My tickets pill enforces height 44', () => {
+  it('header renders AccountMenu with onSignOut and My tickets pill enforces A4 layout (height 36 with hitSlop top 4 and bottom 4)', () => {
     expect(homeSource).toContain('<AccountMenu onSignOut={onSignOut} />');
-    expect(homeSource).toContain('myTicketsPill: {');
-    expect(homeSource).toContain('height: 44');
-    expect(homeSource).toContain('minHeight: 44');
+    const myTicketsPillMatch = homeSource.match(/myTicketsPill:\s*\{[\s\S]*?\}/);
+    expect(myTicketsPillMatch).not.toBeNull();
+    const myTicketsPillCode = myTicketsPillMatch![0];
+    expect(myTicketsPillCode).toContain('height: 36');
+    expect(myTicketsPillCode).toContain('minHeight: 36');
+    expect(homeSource).toMatch(/hitSlop=\{\{\s*top:\s*4,\s*bottom:\s*4/);
   });
 
   it('TicketIcon is a valid SVG vector icon without hex colors', () => {
