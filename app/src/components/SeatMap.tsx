@@ -15,6 +15,8 @@ import { STRINGS } from '../constants/strings';
 import { MAX_SEATS_PER_BOOKING, SeatMapItem, SeatState } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
 import { triggerSeatSelectHaptic } from '../utils/haptics';
+import { EmptyState } from './EmptyState';
+import { getErrorCopy } from '../utils/error';
 
 export { MAX_SEATS_PER_BOOKING };
 
@@ -38,7 +40,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({
 
   const [seats, setSeats] = useState<SeatMapItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
   const [isScreenReaderActive, setIsScreenReaderActive] = useState<boolean>(false);
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
 
@@ -112,7 +114,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({
         });
       } catch (err: any) {
         if (!isPolling) {
-          setError(err.message || STRINGS.common.genericError);
+          setError(err);
         }
       } finally {
         if (!isPolling) setLoading(false);
@@ -432,7 +434,21 @@ export const SeatMap: React.FC<SeatMapProps> = ({
       )}
 
       {/* Seat Map Content */}
-      {isScreenReaderActive ? (
+      {error && seats.length === 0 ? (
+        <View style={[styles.centeredState, { padding: spacing.xl }]}>
+          {(() => {
+            const errorCopy = getErrorCopy(error);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={() => fetchSeats(false)}
+              />
+            );
+          })()}
+        </View>
+      ) : isScreenReaderActive ? (
         // Screen Reader Mode: Horizontally scrollable lines with 44 pt touch targets
         <ScrollView style={styles.screenReaderScroll}>
           {rows.map((rowName) => (
@@ -491,6 +507,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
+  },
+  centeredState: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   screenBarWrapper: {
     alignItems: 'center',

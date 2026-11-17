@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { authClient, AuthSession, AccountScheduledForDeletionError } from '../api/authClient';
 import { signInSchema } from '../schemas/auth';
+import { getDisplayMessage } from '../utils/error';
 
 export interface SignInScreenProps {
   onBack: () => void;
@@ -53,7 +54,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
       ) {
         setFormError(null);
       } else {
-        setFormError(err.message || STRINGS.signIn.invalidCredentialsError);
+        setFormError(getDisplayMessage(err, STRINGS.signIn.invalidCredentialsError));
       }
     } finally {
       setLoading(false);

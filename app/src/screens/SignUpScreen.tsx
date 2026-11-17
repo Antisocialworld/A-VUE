@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { authClient, AuthSession } from '../api/authClient';
 import { checkPasswordRequirements, signUpSchema, verifyCodeSchema } from '../schemas/auth';
+import { getDisplayMessage } from '../utils/error';
 
 export interface SignUpScreenProps {
   onBack: () => void;
@@ -66,7 +67,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
       setStep('verify_code');
       setResendCooldown(60); // 60s cooldown per AGENTS.md
     } catch (err: any) {
-      setFormError(err.message || STRINGS.common.error);
+      setFormError(getDisplayMessage(err, STRINGS.common.error));
     } finally {
       setLoading(false);
     }
@@ -89,7 +90,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
       const session = await authClient.verifySignUpCode(validation.data);
       onSignUpSuccess(session);
     } catch (err: any) {
-      setFormError(err.message || STRINGS.verifyCode.codeExpiredError);
+      setFormError(getDisplayMessage(err, STRINGS.verifyCode.codeExpiredError));
     } finally {
       setLoading(false);
     }
@@ -106,7 +107,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
       const res = await authClient.resendSignUpCode(email);
       setResendCooldown(res.cooldownSeconds);
     } catch (err: any) {
-      setFormError(err.message);
+      setFormError(getDisplayMessage(err, STRINGS.common.error));
     } finally {
       setResending(false);
     }

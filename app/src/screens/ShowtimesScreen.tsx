@@ -19,6 +19,7 @@ import { formatKoboToNaira } from '../utils/money';
 import { buildDateOptions, DateOption, toLocalDateKey } from '../utils/date';
 import { WORDMARK_BOX, WORDMARK_PATHS } from '../components/Wordmark';
 import colorData from '../tokens/color-tokens-orange-green-yellow.json';
+import { getErrorCopy } from '../utils/error';
 
 const CINEMA_CARD_PHOTOS = [
   require('../../assets/photos/cinema-card-1.jpg'),
@@ -53,7 +54,7 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
   const [imageError, setImageError] = useState<boolean>(false);
   const [showtimes, setShowtimes] = useState<ShowtimeItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
 
   const hasPoster = Boolean(posterUrl && !imageError);
   const hasMeta = Boolean(releaseYear || typeof voteAverage === 'number');
@@ -100,7 +101,7 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
       const data = await cinemaClient.getMovieShowtimes(movieId);
       setShowtimes(data.showtimes);
     } catch (err: any) {
-      setError(err.message || STRINGS.common.genericError);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -393,12 +394,17 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
         </View>
       ) : error ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
-          <EmptyState
-            title={STRINGS.common.error}
-            message={error}
-            actionTitle={STRINGS.common.retry}
-            onActionPress={fetchShowtimes}
-          />
+          {(() => {
+            const errorCopy = getErrorCopy(error);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={fetchShowtimes}
+              />
+            );
+          })()}
         </View>
       ) : cinemaGroups.length === 0 ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>

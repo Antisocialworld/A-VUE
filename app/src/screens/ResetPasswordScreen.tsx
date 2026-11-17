@@ -9,6 +9,7 @@ import {
   requestResetSchema,
   resetPasswordSchema,
 } from '../schemas/auth';
+import { getDisplayMessage } from '../utils/error';
 
 export interface ResetPasswordScreenProps {
   onBack: () => void;
@@ -68,7 +69,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       setStep('verify_and_set');
       setResendCooldown(res.cooldownSeconds);
     } catch (err: any) {
-      setFormError(err.message || STRINGS.common.error);
+      setFormError(getDisplayMessage(err, STRINGS.common.error));
     } finally {
       setLoading(false);
     }
@@ -93,7 +94,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       await authClient.resetPassword(validation.data);
       setStep('completed');
     } catch (err: any) {
-      setFormError(err.message || STRINGS.common.error);
+      setFormError(getDisplayMessage(err, STRINGS.common.error));
     } finally {
       setLoading(false);
     }
@@ -109,7 +110,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       const res = await authClient.requestPasswordReset({ email });
       setResendCooldown(res.cooldownSeconds);
     } catch (err: any) {
-      setFormError(err.message || STRINGS.common.error);
+      setFormError(getDisplayMessage(err, STRINGS.common.error));
     } finally {
       setResending(false);
     }

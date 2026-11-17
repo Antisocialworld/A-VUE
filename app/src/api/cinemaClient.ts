@@ -80,13 +80,23 @@ export class CinemaClient {
         const error = new Error(json?.error?.message || STRINGS.common.genericError) as any;
         error.code = json?.error?.code;
         error.status = response.status;
+        const retryAfterHeader = response.headers?.get?.('retry-after');
+        if (retryAfterHeader) {
+          const parsed = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsed)) {
+            error.retryAfter = parsed;
+          }
+        }
         throw error;
       }
 
       return { data: json as T, status: response.status };
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        throw new Error('Request timed out. Please check your connection.');
+        const timeoutError = new Error('Request timed out. Please check your connection.') as any;
+        timeoutError.name = 'AbortError';
+        timeoutError.status = 0;
+        throw timeoutError;
       }
       throw err;
     } finally {

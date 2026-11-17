@@ -12,6 +12,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { TicketItem } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
+import { getErrorCopy } from '../utils/error';
 
 export interface MyTicketsScreenProps {
   onBack: () => void;
@@ -29,7 +30,7 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
   const [tickets, setTickets] = useState<TicketItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
 
   const fetchTickets = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -40,7 +41,7 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
       const res = await cinemaClient.getUserTickets();
       setTickets(res.tickets);
     } catch (err: any) {
-      setError(err.message || STRINGS.common.genericError);
+      setError(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -225,12 +226,17 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
         </View>
       ) : error ? (
         <View style={styles.centeredContainer}>
-          <EmptyState
-            title={STRINGS.common.error}
-            message={error}
-            actionTitle={STRINGS.common.retry}
-            onActionPress={() => fetchTickets(false)}
-          />
+          {(() => {
+            const errorCopy = getErrorCopy(error);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={() => fetchTickets(false)}
+              />
+            );
+          })()}
         </View>
       ) : sortedTickets.length === 0 ? (
         <View style={styles.centeredContainer}>

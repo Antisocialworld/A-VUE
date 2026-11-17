@@ -62,6 +62,16 @@ export const STRINGS = {
     continue: 'Continue',
   },
 
+  errors: {
+    noConnectionTitle: "Can't connect",
+    noConnectionBody: 'Check your internet connection and try again.',
+    serverBusyTitle: "We're busy right now",
+    serverBusyBody: 'Lots of people are booking. Try again in a few seconds.',
+    genericTitle: 'Something went wrong',
+    genericBody: 'Please try again.',
+    tryAgain: 'Try again',
+  },
+
   welcome: {
     title: 'A VUE',
     subtitle: 'A view. Your view. Our view.',

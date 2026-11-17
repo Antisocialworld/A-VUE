@@ -11,6 +11,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { MovieDto } from '../schemas/movies';
 import { moviesClient } from '../api/moviesClient';
+import { getErrorCopy } from '../utils/error';
 
 export interface MovieDetailScreenProps {
   movieId: number;
@@ -32,7 +33,7 @@ export const MovieDetailScreen: React.FC<MovieDetailScreenProps> = ({
 
   const [movie, setMovie] = useState<MovieDto | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
   const [imageError, setImageError] = useState<boolean>(false);
 
   const fetchDetails = useCallback(async () => {
@@ -44,7 +45,7 @@ export const MovieDetailScreen: React.FC<MovieDetailScreenProps> = ({
       const data = await moviesClient.getMovie(movieId);
       setMovie(data);
     } catch (err: any) {
-      setError(err.message || STRINGS.common.genericError);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -94,12 +95,17 @@ export const MovieDetailScreen: React.FC<MovieDetailScreenProps> = ({
         </View>
       ) : error || !movie ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
-          <EmptyState
-            title={STRINGS.common.error}
-            message={error || STRINGS.common.genericError}
-            actionTitle={STRINGS.common.retry}
-            onActionPress={fetchDetails}
-          />
+          {(() => {
+            const errorCopy = getErrorCopy(error);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={fetchDetails}
+              />
+            );
+          })()}
         </View>
       ) : (
         <View style={styles.detailWrapper}>

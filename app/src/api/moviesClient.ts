@@ -70,13 +70,26 @@ export class MoviesClient {
 
       if (!response.ok) {
         const errorMsg = data?.error?.message || STRINGS.common.genericError;
-        throw new Error(errorMsg);
+        const error = new Error(errorMsg) as any;
+        error.code = data?.error?.code;
+        error.status = response.status;
+        const retryAfterHeader = response.headers?.get?.('retry-after');
+        if (retryAfterHeader) {
+          const parsed = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsed)) {
+            error.retryAfter = parsed;
+          }
+        }
+        throw error;
       }
 
       return data as T;
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        throw new Error('Request timed out. Please check your connection.');
+        const timeoutError = new Error('Request timed out. Please check your connection.') as any;
+        timeoutError.name = 'AbortError';
+        timeoutError.status = 0;
+        throw timeoutError;
       }
       throw err;
     } finally {

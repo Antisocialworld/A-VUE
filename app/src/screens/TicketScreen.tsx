@@ -11,6 +11,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { TicketItem } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
+import { getErrorCopy } from '../utils/error';
 
 export interface TicketScreenProps {
   ticketId: string;
@@ -27,9 +28,10 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
 
   const [ticket, setTicket] = useState<TicketItem | null>(initialTicket || null);
   const [loadingTicket, setLoadingTicket] = useState<boolean>(!initialTicket);
+  const [ticketError, setTicketError] = useState<unknown | null>(null);
   const [qrReference, setQrReference] = useState<string | null>(null);
   const [loadingQr, setLoadingQr] = useState<boolean>(true);
-  const [qrError, setQrError] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<unknown | null>(null);
 
   // Fetch ticket details if not passed initially
   const loadTicketData = useCallback(async () => {
@@ -38,14 +40,17 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
       return;
     }
     setLoadingTicket(true);
+    setTicketError(null);
     try {
       const res = await cinemaClient.getUserTickets();
       const found = res.tickets.find((t) => t.id === ticketId);
       if (found) {
         setTicket(found);
+      } else {
+        setTicketError(new Error('NOT_FOUND'));
       }
-    } catch {
-      // Handled in render
+    } catch (err: any) {
+      setTicketError(err);
     } finally {
       setLoadingTicket(false);
     }
@@ -61,7 +66,7 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
       const res = await cinemaClient.generateTicketQr(ticketId);
       setQrReference(res.qrReference);
     } catch (err: any) {
-      setQrError(err.message || STRINGS.common.genericError);
+      setQrError(err);
     } finally {
       setLoadingQr(false);
     }
@@ -97,12 +102,17 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
         </View>
       ) : !ticket ? (
         <View style={styles.centeredContainer}>
-          <EmptyState
-            title={STRINGS.common.error}
-            message="Ticket could not be found."
-            actionTitle={STRINGS.common.back}
-            onActionPress={onBack}
-          />
+          {(() => {
+            const errorCopy = getErrorCopy(ticketError);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={loadTicketData}
+              />
+            );
+          })()}
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
@@ -300,10 +310,18 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
                 </View>
               ) : qrError || !qrReference ? (
                 <View style={styles.qrPlaceholder}>
-                  <Text style={{ color: colors.error, textAlign: 'center', marginBottom: spacing.sm }}>
-                    {qrError || 'QR could not be loaded'}
-                  </Text>
-                  <Button title={STRINGS.tickets.qrRefreshAction} onPress={refreshQrReference} variant="secondary" />
+                  {(() => {
+                    const errorCopy = getErrorCopy(qrError);
+                    return (
+                      <EmptyState
+                        title={errorCopy.title}
+                        message={errorCopy.body}
+                        actionTitle={STRINGS.errors.tryAgain}
+                        onActionPress={refreshQrReference}
+                        style={{ backgroundColor: 'transparent' }}
+                      />
+                    );
+                  })()}
                 </View>
               ) : (
                 <View style={{ alignItems: 'center' }}>

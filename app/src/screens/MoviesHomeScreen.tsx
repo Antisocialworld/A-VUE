@@ -22,6 +22,7 @@ import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { MovieDto } from '../schemas/movies';
 import { moviesClient } from '../api/moviesClient';
+import { getErrorCopy } from '../utils/error';
 
 export interface MovieSelectParams {
   movieId: number;
@@ -58,7 +59,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
 
   const headerRight = (
     <View style={[styles.headerRightContainer, { gap: spacing.sm }]}>
@@ -116,7 +117,7 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
       setPage(response.page);
       setTotalPages(response.totalPages);
     } catch (err: any) {
-      setError(err.message || STRINGS.common.genericError);
+      setError(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -220,13 +221,18 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
         renderLoadingSkeletons()
       ) : error && movies.length === 0 ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
-          <EmptyState
-            title={STRINGS.common.error}
-            message={error}
-            actionTitle={STRINGS.common.retry}
-            onActionPress={handleRetry}
-            showWatermark={false}
-          />
+          {(() => {
+            const errorCopy = getErrorCopy(error);
+            return (
+              <EmptyState
+                title={errorCopy.title}
+                message={errorCopy.body}
+                actionTitle={STRINGS.errors.tryAgain}
+                onActionPress={handleRetry}
+                showWatermark={false}
+              />
+            );
+          })()}
         </View>
       ) : movies.length === 0 ? (
         <MoviesEmptyState onRetry={handleRefresh} />

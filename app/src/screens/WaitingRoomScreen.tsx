@@ -9,6 +9,7 @@ import { PhotoFade, ScreenShell } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { cinemaClient } from '../api/cinemaClient';
+import { getDisplayMessage } from '../utils/error';
 
 export interface WaitingRoomScreenProps {
   showtimeId: string;
@@ -48,7 +49,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
         setPosition(data.position);
       } catch (err: any) {
         if (!isMountedRef.current) return;
-        setErrorMessage(err.message || STRINGS.common.genericError);
+        setErrorMessage(getDisplayMessage(err, STRINGS.common.genericError));
       }
     };
 

@@ -7,6 +7,7 @@ import { STRINGS } from '../constants/strings';
 import { HoldSeatsResponse, SeatMapItem, ShowtimeItem } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
 import { formatKoboToNaira } from '../utils/money';
+import { getDisplayMessage } from '../utils/error';
 
 export interface SeatMapScreenProps {
   showtime: ShowtimeItem;
@@ -65,7 +66,7 @@ export const SeatMapScreen: React.FC<SeatMapScreenProps> = ({
       } else if (err.status === 503) {
         setToastMessage(STRINGS.seatMap.serviceUnavailableToast);
       } else {
-        setToastMessage(err.message || STRINGS.common.genericError);
+        setToastMessage(getDisplayMessage(err, STRINGS.common.genericError));
       }
     } finally {
       setHolding(false);

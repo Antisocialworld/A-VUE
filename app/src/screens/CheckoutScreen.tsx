@@ -19,6 +19,7 @@ import { cinemaClient } from '../api/cinemaClient';
 import { openPaymentBrowser } from '../utils/browser';
 import { generateIdempotencyKey } from '../utils/crypto';
 import { formatKoboToNaira } from '../utils/money';
+import { getDisplayMessage } from '../utils/error';
 
 export interface CheckoutScreenProps {
   showtime: ShowtimeItem;
@@ -175,7 +176,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       // Once user returns to app, begin polling for ticket confirmation
       pollForConfirmation();
     } catch (err: any) {
-      setErrorMessage(err.message || STRINGS.common.genericError);
+      setErrorMessage(getDisplayMessage(err, STRINGS.common.genericError));
       setCheckoutState('idle');
     }
   };

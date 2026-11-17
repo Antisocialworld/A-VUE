@@ -14,6 +14,7 @@ import { TextField } from './TextField';
 import { PasswordField } from './PasswordField';
 import { Button } from './Button';
 import { authClient } from '../api/authClient';
+import { getDisplayMessage } from '../utils/error';
 
 export interface AccountMenuProps {
   onSignOut: () => void;
@@ -84,7 +85,7 @@ export const AccountMenu: React.FC<AccountMenuProps> = ({
       if (err?.code === 'HAS_UPCOMING_TICKETS' || err?.message?.includes('upcoming tickets')) {
         setErrorMessage(STRINGS.account.hasUpcomingTicketsError);
       } else {
-        setErrorMessage(err?.message || STRINGS.common.genericError);
+        setErrorMessage(getDisplayMessage(err, STRINGS.common.genericError));
       }
     } finally {
       setLoading(false);
