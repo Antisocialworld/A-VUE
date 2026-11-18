@@ -4,19 +4,19 @@
  * No clock reads, no randomness, no database access: callers pass the halls,
  * movie IDs, and Lagos calendar days in, and get showtime rows back.
  *
- * Layout (the seed supplies 3 screens and 3 slots per day):
+ * Layout (the seed supplies 3 seeded screens and 3 slots per day):
  * - Movies: the first SEED_MOVIE_COUNT ids in the order the script loaded them.
- * - Screens: the first SEED_SCREEN_COUNT halls sorted by id ascending.
+ * - Screens: halls with is_seeded = true (exactly SEED_SCREEN_COUNT).
  * - Slots: 13:00, 16:30, 20:00 Africa/Lagos (+01:00).
  * - Cells per day: screens * slots = 3 * 3 = 9.
  * - Movie: movieIds[(slotIdx + screenIdx + dayIdx) % movieIds.length].
  *
- * Consequences with exactly 3 movies and 3 screens:
+ * Consequences with exactly 3 movies and 3 seeded screens:
  * - The same movie is never placed on two screens at the same start time.
  * - Every movie plays in every slot each day, on 3 different screens per day.
- * - Each day uses all 3 screens, so both cinemas appear.
+ * - Each day uses all 3 seeded screens, so both cinemas appear.
  *
- * The remaining fourth screen gets no seeded showtimes.
+ * Free (is_seeded = false) screens get no seeded showtimes.
  */
 
 export const SEED_MOVIE_COUNT = 3;
@@ -26,6 +26,10 @@ export interface SeedScheduleHall {
   id: string;
   cinemaId: string;
   priceKobo: number;
+}
+
+export interface SeededScheduleHall extends SeedScheduleHall {
+  isSeeded: boolean;
 }
 
 export interface SeedScheduleDay {
@@ -41,22 +45,24 @@ export interface SeedShowtimeRow {
 }
 
 /**
- * Picks the first `count` screens sorted by id ascending, in deterministic
- * order. Ties are broken by cinema id, then price, so the result never depends
- * on the input order. The seed's halls share a common prefix and differ in the
- * final digit, so lexicographic string comparison is the id order.
+ * Selects halls marked is_seeded = true for deterministic seed scheduling.
+ * Requires exactly SEED_SCREEN_COUNT seeded halls; fails loudly otherwise.
+ * Returned in id order for stable slot-to-screen assignment.
  */
-export function selectFirstScreensById<T extends SeedScheduleHall>(
+export function selectSeededScreens<T extends SeededScheduleHall>(
   halls: readonly T[],
-  count: number = SEED_SCREEN_COUNT,
 ): T[] {
-  const sorted = Array.from(halls).sort((a, b) => {
+  const seeded = halls.filter((hall) => hall.isSeeded);
+  if (seeded.length !== SEED_SCREEN_COUNT) {
+    throw new Error(
+      `Expected exactly ${SEED_SCREEN_COUNT} seeded screens (is_seeded = true), found ${seeded.length}.`,
+    );
+  }
+  return Array.from(seeded).sort((a, b) => {
     if (a.id !== b.id) return a.id < b.id ? -1 : 1;
     if (a.cinemaId !== b.cinemaId) return a.cinemaId < b.cinemaId ? -1 : 1;
     return a.priceKobo - b.priceKobo;
   });
-
-  return sorted.slice(0, Math.max(0, count));
 }
 
 /**

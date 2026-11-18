@@ -254,6 +254,84 @@ describe('On-demand ensure core (transactional, no live DB)', () => {
     expect(result).toEqual({ created: 0, reason: 'NO_CAPACITY' });
   });
 
+  it('uses all supplied free screens so capacity grows and plans only into available slots', async () => {
+    const freeScreens: ScreenDefinition[] = [
+      { id: 'b0000001-0000-4000-8000-000000000003', cinemaId: 'a0000001-0000-4000-8000-000000000001', name: 'Screen 3 (Studio)', priceKobo: 320000 },
+      { id: 'b0000001-0000-4000-8000-000000000004', cinemaId: 'a0000001-0000-4000-8000-000000000001', name: 'Screen 4 (Lounge)', priceKobo: 420000 },
+      { id: 'b0000002-0000-4000-8000-000000000002', cinemaId: 'a0000001-0000-4000-8000-000000000002', name: 'Screen 2 (Arena)', priceKobo: 400000 },
+      { id: 'b0000002-0000-4000-8000-000000000003', cinemaId: 'a0000001-0000-4000-8000-000000000002', name: 'Screen 3 (Plaza)', priceKobo: 380000 },
+    ];
+    const occupied = [
+      { screenId: freeScreens[0].id, startsAt: '2026-11-18T13:00:00+01:00', cancelled: false },
+      { screenId: freeScreens[1].id, startsAt: '2026-11-18T13:00:00+01:00', cancelled: false },
+    ];
+    const store = makeStore({
+      screens: freeScreens,
+      occupied,
+    });
+
+    const result = await ensureOnDemandShowtimes({
+      movieId: 100,
+      releaseDate: '2026-11-01',
+      now: FIXED_NOW,
+      caps: { ...CAPS, slotsPerMoviePerDay: 2 },
+      store,
+    });
+
+    // With 4 free screens, capacity grows beyond a single screen and available slots are used.
+    expect(result).toEqual({ created: 2 });
+    expect(store.inserted).toHaveLength(2);
+
+    const freeScreenIds = new Set(freeScreens.map((s) => s.id));
+    const occupiedPairs = new Set(occupied.map((o) => `${o.screenId}|${o.startsAt}`));
+    for (const item of store.inserted) {
+      expect(freeScreenIds.has(item.screenId)).toBe(true);
+      expect(occupiedPairs.has(`${item.screenId}|${item.startsAt}`)).toBe(false);
+    }
+    // No two planned showtimes on the same screen overlap (3-hour blocks).
+    for (let i = 0; i < store.inserted.length; i++) {
+      for (let j = i + 1; j < store.inserted.length; j++) {
+        if (store.inserted[i].screenId === store.inserted[j].screenId) {
+          const diff = Math.abs(
+            new Date(store.inserted[i].startsAt).getTime() -
+              new Date(store.inserted[j].startsAt).getTime(),
+          );
+          expect(diff).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000);
+        }
+      }
+    }
+  });
+
+  it('returns NO_CAPACITY when all free screen slots are truly full for the request', async () => {
+    const freeScreens: ScreenDefinition[] = [
+      { id: 'b0000001-0000-4000-8000-000000000003', cinemaId: 'a0000001-0000-4000-8000-000000000001', name: 'Screen 3 (Studio)', priceKobo: 320000 },
+      { id: 'b0000002-0000-4000-8000-000000000002', cinemaId: 'a0000001-0000-4000-8000-000000000002', name: 'Screen 2 (Arena)', priceKobo: 400000 },
+    ];
+    // Horizon day 0 weekday slots at/after lead time: 13:00, 16:30, 20:00. Occupy all on all free screens.
+    const store = makeStore({
+      screens: freeScreens,
+      occupied: [
+        { screenId: freeScreens[0].id, startsAt: '2026-11-18T13:00:00+01:00', cancelled: false },
+        { screenId: freeScreens[0].id, startsAt: '2026-11-18T16:30:00+01:00', cancelled: false },
+        { screenId: freeScreens[0].id, startsAt: '2026-11-18T20:00:00+01:00', cancelled: false },
+        { screenId: freeScreens[1].id, startsAt: '2026-11-18T13:00:00+01:00', cancelled: false },
+        { screenId: freeScreens[1].id, startsAt: '2026-11-18T16:30:00+01:00', cancelled: false },
+        { screenId: freeScreens[1].id, startsAt: '2026-11-18T20:00:00+01:00', cancelled: false },
+      ],
+    });
+
+    const result = await ensureOnDemandShowtimes({
+      movieId: 100,
+      releaseDate: '2026-11-01',
+      now: FIXED_NOW,
+      caps: { ...CAPS, slotsPerMoviePerDay: 2 },
+      store,
+    });
+
+    expect(result).toEqual({ created: 0, reason: 'NO_CAPACITY' });
+    expect(store.calls).not.toContain('insertShowtimes');
+  });
+
   it('rolls back and rethrows when the insert fails', async () => {
     const store = makeStore({ insertError: new Error('db down') });
 
@@ -300,7 +378,7 @@ describe('On-demand ensure SQL and route invariants', () => {
     expect(occupiedSection).toContain('row.cancelled_at');
   });
 
-  it('reads screen prices directly from screens.price_kobo and excludes NULL prices', () => {
+  it('reads screen prices from free (is_seeded = false) screens with non-NULL prices', () => {
     const start = ensureSrc.indexOf('async listScreens');
     const end = ensureSrc.indexOf('async listOccupied');
     expect(start).toBeGreaterThan(-1);
@@ -308,7 +386,7 @@ describe('On-demand ensure SQL and route invariants', () => {
 
     const listScreensSection = ensureSrc.slice(start, end);
     expect(listScreensSection).toContain('price_kobo');
-    expect(listScreensSection).toContain('WHERE price_kobo IS NOT NULL');
+    expect(listScreensSection).toContain('WHERE price_kobo IS NOT NULL AND is_seeded = false');
     expect(listScreensSection).toContain('FROM screens');
     expect(listScreensSection).not.toContain('showtimes');
   });

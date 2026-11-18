@@ -10,10 +10,10 @@
  * - Never prints connection strings or secrets.
  * - Populates both `screens` and `halls` for API compatibility.
  * - Populates `seats` with both migration 001 and migration 002 column sets.
- * - Requires migration 007: writes screens.price_kobo for every SEED_HALLS entry.
+ * - Requires migration 007/008: writes screens.price_kobo and screens.is_seeded.
  * - Generates showtimes for the next 8 days at 13:00, 16:30, and 20:00 Africa/Lagos time (+01:00).
- * - Seeds the first SEED_MOVIE_COUNT loaded movie ids on the first SEED_SCREEN_COUNT
- *   screens sorted by id ascending. The remaining screen gets no seeded showtimes.
+ * - Seeds the first SEED_MOVIE_COUNT loaded movie ids on exactly the screens with
+ *   is_seeded = true (SEED_SCREEN_COUNT). Free screens (is_seeded = false) get no seeded showtimes.
  * - Rotates movies deterministically across 9 cells per day (3 screens x 3 slots)
  *   with movie = movieIds[(slotIdx + screenIdx + dayIdx) % movieIds.length].
  * - Guards showtime inserts on (screen_id, starts_at) only, with no ON CONFLICT,
@@ -27,7 +27,7 @@ import { getNowPlayingMovies } from '../src/lib/tmdb.js';
 import {
   SEED_MOVIE_COUNT,
   buildSeedShowtimes,
-  selectFirstScreensById,
+  selectSeededScreens,
 } from '../src/lib/seedSchedule.js';
 
 interface CinemaData {
@@ -43,6 +43,7 @@ interface HallData {
   name: string;
   totalSeats: number;
   priceKobo: number;
+  isSeeded: boolean;
   rows: string[];
   seatsPerRow: number;
   accessibleSeats: { row: string; number: number }[];
@@ -64,19 +65,23 @@ export const SEED_CINEMAS: CinemaData[] = [
   },
 ];
 
-// Seating Configurations
+// Seating Configurations (existing + three distinct layouts for free halls)
 const ROWS_80 = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']; // 8 rows * 10 = 80 seats
 const ROWS_50 = ['A', 'B', 'C', 'D', 'E']; // 5 rows * 10 = 50 seats (k6 load test)
+const ROWS_60 = ['A', 'B', 'C', 'D', 'E', 'F']; // 6 rows * 10 = 60 seats
+const ROWS_70 = ['A', 'B', 'C', 'D', 'E', 'F', 'G']; // 7 rows * 10 = 70 seats
+const ROWS_40 = ['A', 'B', 'C', 'D']; // 4 rows * 10 = 40 seats
 
-// 2. Two Halls per Cinema (One 80-seat, One 50-seat, Different integer priceKobo)
+// 2. Halls: 3 seeded (deterministic showtimes) + 4 free/on-demand (is_seeded = false)
 export const SEED_HALLS: HallData[] = [
-  // Cinema 1: Victoria Island
+  // Cinema 1: Victoria Island (seeded)
   {
     id: 'b0000001-0000-4000-8000-000000000001',
     cinemaId: SEED_CINEMAS[0].id,
     name: 'Screen 1 (Grand)',
     totalSeats: 80,
     priceKobo: 350000, // 3,500 NGN in integer kobo
+    isSeeded: true,
     rows: ROWS_80,
     seatsPerRow: 10,
     accessibleSeats: [
@@ -90,6 +95,7 @@ export const SEED_HALLS: HallData[] = [
     name: 'Screen 2 (VIP)',
     totalSeats: 50, // Exactly 50 seats for k6 load test
     priceKobo: 450000, // 4,500 NGN in integer kobo
+    isSeeded: true,
     rows: ROWS_50,
     seatsPerRow: 10,
     accessibleSeats: [
@@ -97,13 +103,43 @@ export const SEED_HALLS: HallData[] = [
       { row: 'A', number: 2 },
     ],
   },
-  // Cinema 2: Ikeja City Mall
+  // Cinema 1: Victoria Island (free/on-demand)
+  {
+    id: 'b0000001-0000-4000-8000-000000000003',
+    cinemaId: SEED_CINEMAS[0].id,
+    name: 'Screen 3 (Studio)',
+    totalSeats: 60,
+    priceKobo: 320000, // 3,200 NGN in integer kobo
+    isSeeded: false,
+    rows: ROWS_60,
+    seatsPerRow: 10,
+    accessibleSeats: [
+      { row: 'A', number: 1 },
+      { row: 'A', number: 2 },
+    ],
+  },
+  {
+    id: 'b0000001-0000-4000-8000-000000000004',
+    cinemaId: SEED_CINEMAS[0].id,
+    name: 'Screen 4 (Lounge)',
+    totalSeats: 40,
+    priceKobo: 420000, // 4,200 NGN in integer kobo
+    isSeeded: false,
+    rows: ROWS_40,
+    seatsPerRow: 10,
+    accessibleSeats: [
+      { row: 'A', number: 1 },
+      { row: 'A', number: 2 },
+    ],
+  },
+  // Cinema 2: Ikeja City Mall (seeded)
   {
     id: 'b0000002-0000-4000-8000-000000000001',
     cinemaId: SEED_CINEMAS[1].id,
     name: 'Screen 1 (Main)',
     totalSeats: 80,
     priceKobo: 300000, // 3,000 NGN in integer kobo
+    isSeeded: true,
     rows: ROWS_80,
     seatsPerRow: 10,
     accessibleSeats: [
@@ -111,13 +147,29 @@ export const SEED_HALLS: HallData[] = [
       { row: 'A', number: 2 },
     ],
   },
+  // Cinema 2: Ikeja City Mall (free/on-demand)
   {
     id: 'b0000002-0000-4000-8000-000000000002',
     cinemaId: SEED_CINEMAS[1].id,
     name: 'Screen 2 (Arena)',
     totalSeats: 50, // Exactly 50 seats for k6 load test
     priceKobo: 400000, // 4,000 NGN in integer kobo
+    isSeeded: false,
     rows: ROWS_50,
+    seatsPerRow: 10,
+    accessibleSeats: [
+      { row: 'A', number: 1 },
+      { row: 'A', number: 2 },
+    ],
+  },
+  {
+    id: 'b0000002-0000-4000-8000-000000000003',
+    cinemaId: SEED_CINEMAS[1].id,
+    name: 'Screen 3 (Plaza)',
+    totalSeats: 70,
+    priceKobo: 380000, // 3,800 NGN in integer kobo
+    isSeeded: false,
+    rows: ROWS_70,
     seatsPerRow: 10,
     accessibleSeats: [
       { row: 'A', number: 1 },
@@ -230,11 +282,11 @@ export async function seedCinema(): Promise<void> {
         [hall.id, hall.cinemaId, hall.name, hall.totalSeats]
       );
 
-      // Screens carry their own price (migration 007). Updating by id keeps
-      // re-runs idempotent and covers screens with no showtime history.
+      // Screens carry their own price and seed flag (migrations 007/008).
+      // Updating by id keeps re-runs idempotent and covers screens with no showtime history.
       await client.query(
-        `UPDATE screens SET price_kobo = $2 WHERE id = $1`,
-        [hall.id, hall.priceKobo]
+        `UPDATE screens SET price_kobo = $2, is_seeded = $3 WHERE id = $1`,
+        [hall.id, hall.priceKobo, hall.isSeeded]
       );
 
       await client.query(
@@ -265,13 +317,13 @@ export async function seedCinema(): Promise<void> {
     }
 
     // 4. Seed Showtimes (next 8 days at 13:00, 16:30, 20:00 Africa/Lagos time).
-    //    First 3 screens by id, deterministic 9-cell daily movie rotation.
+    //    Exactly SEED_SCREEN_COUNT screens with is_seeded = true, deterministic 9-cell daily movie rotation.
     const schedule = getLagosScheduleSlots(8);
-    const showtimeScreens = selectFirstScreensById(SEED_HALLS);
+    const showtimeScreens = selectSeededScreens(SEED_HALLS);
     const showtimeRows = buildSeedShowtimes(seededMovieIds, showtimeScreens, schedule);
 
     console.log(
-      `[Cinema Seed] Showtime screens: ${showtimeScreens.map((s) => s.name).join(', ')}`
+      `[Cinema Seed] Seeded showtime screens (is_seeded=true): ${showtimeScreens.map((s) => s.name).join(', ')}`
     );
 
     for (const row of showtimeRows) {

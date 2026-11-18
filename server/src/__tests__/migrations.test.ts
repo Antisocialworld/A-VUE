@@ -168,4 +168,38 @@ describe('Database Migrations & Ledger Schema Audit (Rule 03)', () => {
       expect(sql).toContain('WHERE s.price_kobo IS NULL');
     });
   });
+
+  describe('Migration 008: Screen Seed Flag (Task E1)', () => {
+    const migration008Path = path.join(migrationsDir, '008_screens_is_seeded.sql');
+
+    it('migration 008 file exists, is forward-only, and records in ledger', () => {
+      expect(fs.existsSync(migration008Path)).toBe(true);
+      const sql = fs.readFileSync(migration008Path, 'utf-8');
+      expect(sql).toContain("INSERT INTO migrations_ledger (filename)");
+      expect(sql).toContain("'008_screens_is_seeded.sql'");
+      expect(sql).toContain('ON CONFLICT (filename) DO NOTHING');
+      expect(sql).not.toMatch(/\bDROP\b/i);
+      expect(sql).not.toMatch(/\bDELETE\b/i);
+    });
+
+    it('adds is_seeded boolean NOT NULL DEFAULT false (idempotent)', () => {
+      const sql = fs.readFileSync(migration008Path, 'utf-8');
+      expect(sql).toContain(
+        'ALTER TABLE screens ADD COLUMN IF NOT EXISTS is_seeded BOOLEAN NOT NULL DEFAULT false',
+      );
+    });
+
+    it('backfills true for exactly VI Grand, VI VIP and Ikeja Main by explicit ids', () => {
+      const sql = fs.readFileSync(migration008Path, 'utf-8');
+      const sqlNoComments = sql.replace(/--.*$/gm, '');
+      expect(sql).toContain('UPDATE screens');
+      expect(sql).toContain('SET is_seeded = true');
+      expect(sql).toContain('WHERE id IN (');
+      expect(sql).toContain("'b0000001-0000-4000-8000-000000000001'");
+      expect(sql).toContain("'b0000001-0000-4000-8000-000000000002'");
+      expect(sql).toContain("'b0000002-0000-4000-8000-000000000001'");
+      expect(sqlNoComments).not.toContain('ORDER BY');
+      expect(sqlNoComments).not.toContain('LIMIT');
+    });
+  });
 });

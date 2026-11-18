@@ -5,8 +5,9 @@ import {
   SEED_MOVIE_COUNT,
   SEED_SCREEN_COUNT,
   buildSeedShowtimes,
-  selectFirstScreensById,
+  selectSeededScreens,
   type SeedScheduleDay,
+  type SeededScheduleHall,
 } from '../lib/seedSchedule.js';
 
 // The script loads movie ids from the backend (or its fallback list), then keeps
@@ -14,28 +15,50 @@ import {
 const LOADED_MOVIE_IDS = ['550', '933260', '1022789', '533535', '693134', '823464'];
 const MOVIE_IDS = LOADED_MOVIE_IDS.slice(0, SEED_MOVIE_COUNT);
 
-// Real ids and prices from SEED_HALLS, deliberately shuffled so the selector
-// cannot accidentally pass by relying on input order.
-const HALLS = [
+// Real ids and prices, deliberately shuffled so selection cannot rely on input order.
+// Includes 3 seeded screens and 4 free screens (on-demand).
+const HALLS: SeededScheduleHall[] = [
   {
     id: 'b0000002-0000-4000-8000-000000000002',
     cinemaId: 'a0000001-0000-4000-8000-000000000002',
     priceKobo: 400000,
+    isSeeded: false,
+  },
+  {
+    id: 'b0000001-0000-4000-8000-000000000004',
+    cinemaId: 'a0000001-0000-4000-8000-000000000001',
+    priceKobo: 420000,
+    isSeeded: false,
   },
   {
     id: 'b0000001-0000-4000-8000-000000000002',
     cinemaId: 'a0000001-0000-4000-8000-000000000001',
     priceKobo: 450000,
+    isSeeded: true,
+  },
+  {
+    id: 'b0000002-0000-4000-8000-000000000003',
+    cinemaId: 'a0000001-0000-4000-8000-000000000002',
+    priceKobo: 380000,
+    isSeeded: false,
   },
   {
     id: 'b0000002-0000-4000-8000-000000000001',
     cinemaId: 'a0000001-0000-4000-8000-000000000002',
     priceKobo: 300000,
+    isSeeded: true,
+  },
+  {
+    id: 'b0000001-0000-4000-8000-000000000003',
+    cinemaId: 'a0000001-0000-4000-8000-000000000001',
+    priceKobo: 320000,
+    isSeeded: false,
   },
   {
     id: 'b0000001-0000-4000-8000-000000000001',
     cinemaId: 'a0000001-0000-4000-8000-000000000001',
     priceKobo: 350000,
+    isSeeded: true,
   },
 ];
 
@@ -49,35 +72,60 @@ const SCHEDULE: SeedScheduleDay[] = Array.from({ length: 8 }, (_, i) => {
   };
 });
 
-const SCREENS = selectFirstScreensById(HALLS);
+const SCREENS = selectSeededScreens(HALLS);
 const ROWS = buildSeedShowtimes(MOVIE_IDS, SCREENS, SCHEDULE);
 
-describe('Task S2: deterministic cinema seed schedule', () => {
-  it('exports the seed counts and selects the first 3 screens sorted by id', () => {
+describe('Task E2: deterministic cinema seed schedule (is_seeded selection)', () => {
+  it('exports the seed counts and selects exactly the 3 is_seeded screens sorted by id', () => {
     expect(SEED_MOVIE_COUNT).toBe(3);
     expect(SEED_SCREEN_COUNT).toBe(3);
 
     expect(SCREENS.map((s) => s.id)).toEqual([
-      'b0000001-0000-4000-8000-000000000001',
-      'b0000001-0000-4000-8000-000000000002',
-      'b0000002-0000-4000-8000-000000000001',
+      'b0000001-0000-4000-8000-000000000001', // VI Grand
+      'b0000001-0000-4000-8000-000000000002', // VI VIP
+      'b0000002-0000-4000-8000-000000000001', // Ikeja Main
     ]);
+    expect(SCREENS.every((s) => s.isSeeded)).toBe(true);
     expect(SCREENS.map((s) => s.priceKobo)).toEqual([350000, 450000, 300000]);
-
-    // The fourth screen (Ikeja Arena) keeps its seed price but gets no showtimes.
-    const remaining = HALLS.filter((hall) => !SCREENS.some((screen) => screen.id === hall.id));
-    expect(remaining.map((hall) => hall.id)).toEqual([
-      'b0000002-0000-4000-8000-000000000002',
-    ]);
   });
 
-  it('selects deterministically regardless of input order', () => {
-    const reversed = selectFirstScreensById([...HALLS].reverse());
+  it('selects seeded screens deterministically regardless of input order', () => {
+    const reversed = selectSeededScreens([...HALLS].reverse());
     expect(reversed).toEqual(SCREENS);
   });
 
-  it('produces 9 cells per day for 8 days (72 rows)', () => {
+  it('fails loudly with a clear error when is_seeded count is not 3', () => {
+    const tooFew = HALLS.filter((h) => h.id !== 'b0000002-0000-4000-8000-000000000001');
+    expect(() => selectSeededScreens(tooFew)).toThrowError(
+      'Expected exactly 3 seeded screens (is_seeded = true), found 2.',
+    );
+
+    const tooMany = [
+      ...HALLS,
+      {
+        id: 'b0000002-0000-4000-8000-000000000099',
+        cinemaId: 'a0000001-0000-4000-8000-000000000002',
+        priceKobo: 310000,
+        isSeeded: true,
+      },
+    ];
+    expect(() => selectSeededScreens(tooMany)).toThrowError(
+      'Expected exactly 3 seeded screens (is_seeded = true), found 4.',
+    );
+  });
+
+  it('produces 9 cells per day for 8 days (72 rows) and keeps free screens unseeded', () => {
     expect(ROWS).toHaveLength(8 * 9);
+
+    const seededIds = new Set(SCREENS.map((s) => s.id));
+    const freeIds = HALLS.filter((h) => !h.isSeeded).map((h) => h.id);
+    expect(freeIds.length).toBeGreaterThan(0);
+    for (const row of ROWS) {
+      expect(seededIds.has(row.screenId)).toBe(true);
+    }
+    for (const freeId of freeIds) {
+      expect(ROWS.some((row) => row.screenId === freeId)).toBe(false);
+    }
   });
 
   it('never repeats (screen_id, starts_at)', () => {
@@ -117,7 +165,7 @@ describe('Task S2: deterministic cinema seed schedule', () => {
     }
   });
 
-  it('uses all 3 screens and both cinemas every day, leaving the fourth screen empty', () => {
+  it('uses all 3 seeded screens and both cinemas every day', () => {
     const screenIds = new Set(SCREENS.map((screen) => screen.id));
     const cinemaIds = new Set(SCREENS.map((screen) => screen.cinemaId));
 
@@ -138,9 +186,6 @@ describe('Task S2: deterministic cinema seed schedule', () => {
         'a0000001-0000-4000-8000-000000000001',
         'a0000001-0000-4000-8000-000000000002',
       ]),
-    );
-    expect(ROWS.some((row) => row.screenId === 'b0000002-0000-4000-8000-000000000002')).toBe(
-      false,
     );
   });
 
@@ -173,20 +218,21 @@ describe('Task S2: deterministic cinema seed schedule', () => {
   });
 });
 
-describe('Task S2: seed-cinema.ts wiring', () => {
+describe('Task E2: seed-cinema.ts wiring', () => {
   const scriptPath = path.resolve(__dirname, '../../scripts/seed-cinema.ts');
   const scriptSrc = fs.readFileSync(scriptPath, 'utf-8');
 
-  it('builds rows from the first 3 movies and first 3 screens via the pure module', () => {
+  it('builds rows from the first 3 movies and is_seeded screens via the pure module', () => {
     expect(scriptSrc).toContain('getLagosScheduleSlots(8)');
     expect(scriptSrc).toContain('movieIds.slice(0, SEED_MOVIE_COUNT)');
-    expect(scriptSrc).toContain('selectFirstScreensById(SEED_HALLS)');
+    expect(scriptSrc).toContain('selectSeededScreens(SEED_HALLS)');
     expect(scriptSrc).toContain(
       'buildSeedShowtimes(seededMovieIds, showtimeScreens, schedule)',
     );
   });
 
-  it('no longer uses the old one-screen-per-cinema selector', () => {
+  it('no longer uses the old id-order screen selector', () => {
+    expect(scriptSrc).not.toContain('selectFirstScreensById');
     expect(scriptSrc).not.toContain('selectLowestIdScreenPerCinema');
   });
 

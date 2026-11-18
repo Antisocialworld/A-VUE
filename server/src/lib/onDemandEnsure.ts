@@ -237,10 +237,11 @@ export function createPgOnDemandStore(client: PoolClient): OnDemandStore {
       // screens.price_kobo is authoritative (migration 007). A NULL price means
       // the screen has no configured price, so it is excluded rather than given
       // an invented price.
+      // Free/on-demand screens only (is_seeded = false); seeded screens keep fixed seed rows.
       const result: QueryResultLike = await client.query(
         `SELECT id, cinema_id, name, price_kobo
          FROM screens
-         WHERE price_kobo IS NOT NULL
+         WHERE price_kobo IS NOT NULL AND is_seeded = false
          ORDER BY id ASC`,
       );
 
