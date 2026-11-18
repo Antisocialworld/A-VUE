@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
+import { getWebMovieColumns } from '../utils/webLayout';
 
 describe('A VUE Movies Header Option A Contract', () => {
   const screenShellPath = path.resolve(__dirname, '../components/ScreenShell.tsx');
@@ -99,5 +100,16 @@ describe('A VUE Movies Header Option A Contract', () => {
     expect(leftTitleSnippet).toContain('color: colors.on_surface');
     expect(leftTitleSnippet).toContain('accessibilityRole="header"');
     expect(leftTitleSnippet).toContain('numberOfLines={1}');
+  });
+});
+
+describe('A VUE web movie grid columns', () => {
+  it('derives columns from width with a minimum of 2', () => {
+    expect(getWebMovieColumns(390)).toBe(2);
+    expect(getWebMovieColumns(899)).toBe(3);
+    expect(getWebMovieColumns(900)).toBe(3);
+    expect(getWebMovieColumns(1440)).toBe(6);
+    expect(getWebMovieColumns(2560)).toBe(11);
+    expect(getWebMovieColumns(0)).toBe(2);
   });
 });

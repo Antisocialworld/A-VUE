@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { FontProvider } from './src/context/FontLoader';
@@ -17,11 +17,14 @@ import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
-import { Button, PhotoFade } from './src/components';
+import { AskAssistantScreen } from './src/screens/AskAssistantScreen';
+import { AssistantPanel, Button, PhotoFade, WebColumn } from './src/components';
 import { STRINGS, formatDeletableDate } from './src/constants/strings';
 import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
 import { cinemaClient } from './src/api/cinemaClient';
 import { HoldSeatsResponse, SeatMapItem, ShowtimeItem } from './src/schemas/cinema';
+import { shouldUseAssistantPanel } from './src/utils/assistantLayout';
+import { onSessionExpired } from './src/lib/sessionExpired';
 
 type ScreenRoute =
   | 'welcome'
@@ -31,6 +34,7 @@ type ScreenRoute =
   | 'gallery'
   | 'movies'
   | 'search'
+  | 'ask_assistant'
   | 'movie_detail'
   | 'showtimes'
   | 'seat_map'
@@ -55,6 +59,9 @@ const MainNavigator: React.FC = () => {
   const [holdResponse, setHoldResponse] = useState<HoldSeatsResponse | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [assistantPanelOpen, setAssistantPanelOpen] = useState<boolean>(false);
+  const { width: windowWidth } = useWindowDimensions();
+  const useAssistantPanel = shouldUseAssistantPanel(Platform.OS, windowWidth);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -116,38 +123,61 @@ const MainNavigator: React.FC = () => {
     }
   };
 
+  const withWebColumn = (screen: React.ReactElement) =>
+    Platform.OS === 'web' ? <WebColumn>{screen}</WebColumn> : screen;
+
+  const openAssistant = () => {
+    if (useAssistantPanel) {
+      setAssistantPanelOpen(true);
+      return;
+    }
+    setCurrentRoute('ask_assistant');
+  };
+
+  const handleAssistantSessionExpired = () => {
+    setAssistantPanelOpen(false);
+    setActiveSession(null);
+    setCurrentRoute('sign_in');
+  };
+
+  // Any authenticated client's 401 reuses this exact session-expired flow.
+  useEffect(() => {
+    const unsubscribe = onSessionExpired(() => handleAssistantSessionExpired());
+    return unsubscribe;
+  }, []);
+
   const renderScreen = () => {
     if (currentRoute === 'gallery') {
       return <ComponentGalleryScreen onBack={() => setCurrentRoute(activeSession ? 'movies' : 'welcome')} />;
     }
 
   if (currentRoute === 'sign_in') {
-    return (
+    return withWebColumn(
       <SignInScreen
         onBack={() => setCurrentRoute('welcome')}
         onNavigateToSignUp={() => setCurrentRoute('sign_up')}
         onNavigateToResetPassword={() => setCurrentRoute('reset_password')}
         onSignInSuccess={handleSignInSuccess}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'sign_up') {
-    return (
+    return withWebColumn(
       <SignUpScreen
         onBack={() => setCurrentRoute('welcome')}
         onNavigateToSignIn={() => setCurrentRoute('sign_in')}
         onSignUpSuccess={handleSignUpSuccess}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'reset_password') {
-    return (
+    return withWebColumn(
       <ResetPasswordScreen
         onBack={() => setCurrentRoute('sign_in')}
         onNavigateToSignIn={() => setCurrentRoute('sign_in')}
-      />
+      />,
     );
   }
 
@@ -156,6 +186,7 @@ const MainNavigator: React.FC = () => {
       <MoviesHomeScreen
         onSignOut={handleSignOut}
         onOpenSearch={() => setCurrentRoute('search')}
+        onOpenAssistant={openAssistant}
         onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
           if (typeof movieOrId === 'object' && movieOrId !== null) {
             setSelectedMovieId(movieOrId.movieId);
@@ -201,8 +232,17 @@ const MainNavigator: React.FC = () => {
     );
   }
 
+  if (currentRoute === 'ask_assistant' && activeSession) {
+    return withWebColumn(
+      <AskAssistantScreen
+        onBack={() => setCurrentRoute('movies')}
+        onSessionExpired={handleAssistantSessionExpired}
+      />,
+    );
+  }
+
   if (currentRoute === 'movie_detail' && selectedMovieId !== null) {
-    return (
+    return withWebColumn(
       <MovieDetailScreen
         movieId={selectedMovieId}
         onBack={() => {
@@ -218,12 +258,12 @@ const MainNavigator: React.FC = () => {
           setSelectedMovieTitle(title);
           setCurrentRoute('showtimes');
         }}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'showtimes' && selectedMovieId !== null) {
-    return (
+    return withWebColumn(
       <ShowtimesScreen
         movieId={selectedMovieId}
         movieTitle={selectedMovieTitle || 'Showtimes'}
@@ -235,12 +275,12 @@ const MainNavigator: React.FC = () => {
           setSelectedShowtime(st);
           setCurrentRoute('seat_map');
         }}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'seat_map' && selectedShowtime !== null) {
-    return (
+    return withWebColumn(
       <SeatMapScreen
         showtime={selectedShowtime}
         movieTitle={selectedMovieTitle || 'Select Seats'}
@@ -262,7 +302,7 @@ const MainNavigator: React.FC = () => {
           }
           setCurrentRoute('waiting_room');
         }}
-      />
+      />,
     );
   }
 
@@ -294,7 +334,7 @@ const MainNavigator: React.FC = () => {
   if (currentRoute === 'checkout' && selectedShowtime !== null && holdResponse !== null) {
     const activeSeats = selectedSeatsRef.current.length > 0 ? selectedSeatsRef.current : selectedSeats;
     const activeSeatIds = selectedSeatIdsRef.current.length > 0 ? selectedSeatIdsRef.current : selectedSeatIds;
-    return (
+    return withWebColumn(
       <CheckoutScreen
         showtime={selectedShowtime}
         selectedSeatIds={activeSeatIds}
@@ -307,21 +347,21 @@ const MainNavigator: React.FC = () => {
           setCurrentRoute('ticket');
         }}
         onGoToMyTickets={() => setCurrentRoute('my_tickets')}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'ticket' && selectedTicketId !== null) {
-    return (
+    return withWebColumn(
       <TicketScreen
         ticketId={selectedTicketId}
         onBack={() => setCurrentRoute('my_tickets')}
-      />
+      />,
     );
   }
 
   if (currentRoute === 'my_tickets') {
-    return (
+    return withWebColumn(
       <MyTicketsScreen
         onBack={() => setCurrentRoute('movies')}
         onSelectTicket={(ticket) => {
@@ -329,7 +369,7 @@ const MainNavigator: React.FC = () => {
           setCurrentRoute('ticket');
         }}
         onBrowseMovies={() => setCurrentRoute('movies')}
-      />
+      />,
     );
   }
 
@@ -342,9 +382,16 @@ const MainNavigator: React.FC = () => {
     );
   };
 
-  return (
+  const content = (
     <>
       {renderScreen()}
+
+      {assistantPanelOpen && useAssistantPanel && activeSession ? (
+        <AssistantPanel
+          onClose={() => setAssistantPanelOpen(false)}
+          onSessionExpired={handleAssistantSessionExpired}
+        />
+      ) : null}
 
       {/* In-app Splash Overlay (Task C) */}
       {showSplash && (
@@ -437,9 +484,19 @@ const MainNavigator: React.FC = () => {
       )}
     </>
   );
+
+  if (Platform.OS === 'web') {
+    return <View style={styles.webRoot}>{content}</View>;
+  }
+
+  return content;
 };
 
 const styles = StyleSheet.create({
+  webRoot: {
+    flex: 1,
+    position: 'relative',
+  },
   modalBackdrop: {
     flex: 1,
     justifyContent: 'center',

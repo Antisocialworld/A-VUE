@@ -27,6 +27,21 @@ const envSchema = z.object({
     .default(false),
   REQUEST_TIMEOUT_MS: z.coerce.number().default(10000),
   BODY_LIMIT_KB: z.coerce.number().default(100),
+  WEB_ALLOWED_ORIGINS: z.preprocess(
+    (val) => (typeof val === 'string' ? val.split(',').map((origin) => origin.trim()).filter(Boolean) : []),
+    z
+      .array(
+        z.string().refine((origin) => {
+          if (origin.includes('*')) return false;
+          try {
+            return new URL(origin).origin === origin;
+          } catch {
+            return false;
+          }
+        }, 'WEB_ALLOWED_ORIGINS must contain exact origins only'),
+      )
+      .default([]),
+  ),
 
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
@@ -86,6 +101,8 @@ const envSchema = z.object({
   RATE_LIMIT_AUTH_IP: z.coerce.number().default(30),
   RATE_LIMIT_ONDEMAND_USER: z.coerce.number().default(5),
   RATE_LIMIT_ONDEMAND_IP: z.coerce.number().default(20),
+  ASSISTANT_RATE_USER_PER_MIN: z.coerce.number().int().positive().max(600).default(10),
+  ASSISTANT_RATE_IP_PER_MIN: z.coerce.number().int().positive().max(600).default(30),
 
   // Search Constants
   SEARCH_CACHE_TTL_SECONDS: z.coerce.number().default(600),
@@ -116,6 +133,28 @@ const envSchema = z.object({
 
   // Observability
   ERROR_TRACKING_DSN: z.string().optional(),
+
+  // Assistant (Ask A VUE, Gemini) - optional at boot; missing key/model => assistant route 503
+  GEMINI_API_KEY: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined),
+    z.string().optional(),
+  ),
+  GEMINI_CHAT_MODEL: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined),
+    z.string().optional(),
+  ),
+  GEMINI_FALLBACK_MODEL: z.string().optional(),
+  // Per-attempt deadline; two attempts stay below the app's 25 s client timeout.
+  // Blank values (as documented in .env.example) fall back to the default.
+  GEMINI_ATTEMPT_TIMEOUT_MS: z.preprocess(
+    (val) => (val === undefined || (typeof val === 'string' && val.trim() === '') ? undefined : val),
+    z.coerce.number().int().min(2000).max(15000).default(8000),
+  ),
+  GEMINI_EMBEDDING_MODEL: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined),
+    z.string().optional(),
+  ),
+  EMBEDDING_DIMENSIONS: z.coerce.number().default(768),
 
   // Authorization (Task 5)
   ADMIN_EMAILS: z.string().optional().default(''),

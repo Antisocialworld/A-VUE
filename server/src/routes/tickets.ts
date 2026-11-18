@@ -143,12 +143,13 @@ export async function ticketRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * POST /tickets/:id/qr
+   * POST /tickets/qr
    * Generates a fresh 256-bit crypto.randomBytes reference once.
+   * Ticket id is passed in the JSON body, never in the URL.
    * Atomically replaces qr_hash in DB in one statement.
    * Owner only (Task 4a).
    */
-  fastify.post('/tickets/:id/qr', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/tickets/qr', async (request: FastifyRequest, reply: FastifyReply) => {
     let user;
     try {
       user = await getSessionUser(request);
@@ -165,7 +166,18 @@ export async function ticketRoutes(fastify: FastifyInstance) {
       throw err;
     }
 
-    const { id: ticketId } = request.params as { id: string };
+    const body = request.body as { ticketId?: string };
+    const ticketId = typeof body?.ticketId === 'string' ? body.ticketId.trim() : '';
+
+    if (!ticketId) {
+      return reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'A ticket id is required.',
+          requestId: request.id,
+        },
+      });
+    }
 
     // Fresh 256-bit opaque reference
     const freshReference = crypto.randomBytes(32).toString('hex');

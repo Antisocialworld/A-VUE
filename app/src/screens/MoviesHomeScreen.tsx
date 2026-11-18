@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import {
   AccountMenu,
   Button,
@@ -24,6 +28,11 @@ import { STRINGS } from '../constants/strings';
 import { MovieDto } from '../schemas/movies';
 import { moviesClient } from '../api/moviesClient';
 import { getErrorCopy } from '../utils/error';
+import {
+  getWebMovieColumns,
+  WEB_GRID_GAP,
+  WEB_GRID_SIDE_PADDING,
+} from '../utils/webLayout';
 
 export interface MovieSelectParams {
   movieId: number;
@@ -46,6 +55,7 @@ export interface MoviesHomeScreenProps {
   onSelectMovie: MovieSelectHandler;
   onNavigateToTickets?: () => void;
   onOpenSearch?: () => void;
+  onOpenAssistant?: () => void;
 }
 
 export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
@@ -53,8 +63,13 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
   onSelectMovie,
   onNavigateToTickets,
   onOpenSearch,
+  onOpenAssistant,
 }) => {
-  const { spacing, colors, typography, mode, radius } = useTheme();
+  const { spacing, colors, typography, mode, radius, shadows } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isWeb = Platform.OS === 'web';
+  const webColumns = getWebMovieColumns(windowWidth);
 
   const [movies, setMovies] = useState<MovieDto[]>([]);
   const [page, setPage] = useState<number>(1);
@@ -203,34 +218,69 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
 
   const renderItem = useCallback(
     ({ item }: { item: MovieDto }) => (
-      <View style={styles.cardWrapper}>
+      <View
+        style={[
+          styles.cardWrapper,
+          isWeb && {
+            flexBasis: `${100 / webColumns}%`,
+            maxWidth: `${100 / webColumns}%`,
+            marginBottom: WEB_GRID_GAP,
+          },
+        ]}
+      >
         <MovieCard movie={item} onPress={() => handleSelectMovie(item)} />
       </View>
     ),
-    [handleSelectMovie],
+    [handleSelectMovie, isWeb, webColumns],
   );
 
-  // Render 6 skeleton cards in 2-column grid during initial load
-  const renderLoadingSkeletons = () => (
-    <View style={[styles.gridContainer, { padding: spacing.base }]}>
-      {[0, 1, 2, 3, 4, 5].map((key) => (
-        <View key={key} style={[styles.skeletonCard, { borderRadius: radius.md, padding: spacing.sm, backgroundColor: colors.surface_container_low }]}>
-          <Skeleton height={180} borderRadius={radius.sm} />
-          <View style={{ marginTop: spacing.xs }}>
-            <Skeleton height={16} width="80%" borderRadius={radius.sm} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs }}>
-              <Skeleton height={12} width="35%" borderRadius={radius.sm} />
-              <Skeleton height={12} width="25%" borderRadius={radius.sm} />
+  // Native keeps its 2-column skeleton; web follows the same width-derived column rule.
+  const renderLoadingSkeletons = () => {
+    const skeletonCount = isWeb ? webColumns * 3 : 6;
+    return (
+      <View
+        style={[
+          styles.gridContainer,
+          isWeb
+            ? {
+                padding: 0,
+                paddingHorizontal: WEB_GRID_SIDE_PADDING,
+                gap: WEB_GRID_GAP,
+              }
+            : { padding: spacing.base },
+        ]}
+      >
+        {Array.from({ length: skeletonCount }, (_, key) => key).map((key) => (
+          <View
+            key={key}
+            style={[
+              styles.skeletonCard,
+              isWeb && {
+                width: `${100 / webColumns}%`,
+                marginBottom: WEB_GRID_GAP,
+              },
+              { borderRadius: radius.md, padding: spacing.sm, backgroundColor: colors.surface_container_low },
+            ]}
+          >
+            <Skeleton height={180} borderRadius={radius.sm} />
+            <View style={{ marginTop: spacing.xs }}>
+              <Skeleton height={16} width="80%" borderRadius={radius.sm} />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs }}>
+                <Skeleton height={12} width="35%" borderRadius={radius.sm} />
+                <Skeleton height={12} width="25%" borderRadius={radius.sm} />
+              </View>
             </View>
           </View>
-        </View>
-      ))}
-    </View>
-  );
+        ))}
+      </View>
+    );
+  };
 
   // Real outer horizontal inset of movie cards from screen edge:
   // ScreenShell fixed content padding (spacing.base) + FlatList contentContainerStyle padding (spacing.base) = 32 pt.
   const cardGridInset = spacing.base + spacing.base;
+  const assistantFabBottom = Math.max(insets.bottom, spacing.base) + spacing.base;
+  const listBottomPadding = spacing.xxl + (onOpenAssistant ? 88 : 0);
 
   return (
     <ScreenShell
@@ -239,64 +289,116 @@ export const MoviesHomeScreen: React.FC<MoviesHomeScreenProps> = ({
       headerInset={cardGridInset}
       headerRight={headerRight}
       scrollable={false}
-      contentContainerStyle={styles.container}
+      contentContainerStyle={{
+        flex: 1,
+        padding: spacing.base,
+        ...(isWeb ? { padding: 0 } : null),
+      }}
     >
-      {loading && !refreshing ? (
-        renderLoadingSkeletons()
-      ) : error && movies.length === 0 ? (
-        <View style={[styles.centeredState, { padding: spacing.xl }]}>
-          {(() => {
-            const errorCopy = getErrorCopy(error);
-            return (
-              <EmptyState
-                title={errorCopy.title}
-                message={errorCopy.body}
-                actionTitle={STRINGS.errors.tryAgain}
-                onActionPress={handleRetry}
-                showWatermark={false}
-              />
-            );
-          })()}
-        </View>
-      ) : movies.length === 0 ? (
-        <MoviesEmptyState onRetry={handleRefresh} />
-      ) : (
-        <FlatList
-          data={movies}
-          keyExtractor={keyExtractor}
-          numColumns={2}
-          columnWrapperStyle={{ gap: spacing.md }}
-          contentContainerStyle={{
-            padding: spacing.base,
-            paddingBottom: spacing.xxl,
-          }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
-          }
-          renderItem={renderItem}
-          ListFooterComponent={
-            <View style={[styles.footerContainer, { marginTop: spacing.lg }]}>
-              {/* Pagination by 'Load more' button (no infinite scroll per Task 3) */}
-              {page < totalPages && page < 5 && (
-                <Button
-                  title={STRINGS.movies.loadMoreAction}
-                  onPress={handleLoadMore}
-                  loading={loadingMore}
-                  variant="secondary"
-                  style={styles.loadMoreButton}
+      <View style={styles.container}>
+        {loading && !refreshing ? (
+          renderLoadingSkeletons()
+        ) : error && movies.length === 0 ? (
+          <View style={[styles.centeredState, { padding: spacing.xl }]}>
+            {(() => {
+              const errorCopy = getErrorCopy(error);
+              return (
+                <EmptyState
+                  title={errorCopy.title}
+                  message={errorCopy.body}
+                  actionTitle={STRINGS.errors.tryAgain}
+                  onActionPress={handleRetry}
+                  showWatermark={false}
                 />
-              )}
+              );
+            })()}
+          </View>
+        ) : movies.length === 0 ? (
+          <MoviesEmptyState onRetry={handleRefresh} />
+        ) : (
+          <FlatList
+            data={movies}
+            keyExtractor={keyExtractor}
+            numColumns={isWeb ? webColumns : 2}
+            columnWrapperStyle={[
+              { gap: spacing.md },
+              isWeb && { gap: WEB_GRID_GAP },
+            ]}
+            contentContainerStyle={[
+              {
+                padding: spacing.base,
+                paddingBottom: listBottomPadding,
+              },
+              isWeb && {
+                padding: 0,
+                paddingHorizontal: WEB_GRID_SIDE_PADDING,
+                paddingBottom: listBottomPadding + WEB_GRID_GAP,
+              },
+            ]}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+              />
+            }
+            renderItem={renderItem}
+            ListFooterComponent={
+              <View style={[styles.footerContainer, { marginTop: spacing.lg }]}>
+                {/* Pagination by 'Load more' button (no infinite scroll per Task 3) */}
+                {page < totalPages && page < 5 && (
+                  <Button
+                    title={STRINGS.movies.loadMoreAction}
+                    onPress={handleLoadMore}
+                    loading={loadingMore}
+                    variant="secondary"
+                    style={styles.loadMoreButton}
+                  />
+                )}
 
-              {/* TMDB attribution requirement (Task B) */}
-              <TmdbAttribution style={{ marginTop: spacing.xl }} />
-            </View>
-          }
-        />
-      )}
+                {/* TMDB attribution requirement (Task B) */}
+                <TmdbAttribution style={{ marginTop: spacing.xl }} />
+              </View>
+            }
+          />
+        )}
+
+        {onOpenAssistant ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={STRINGS.assistant.fabAccessibilityLabel}
+            onPress={onOpenAssistant}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            style={({ pressed }) => [
+              shadows.medium,
+              styles.assistantFab,
+              {
+                right: isWeb ? WEB_GRID_SIDE_PADDING : spacing.base,
+                bottom: assistantFabBottom,
+                backgroundColor: colors.primary,
+                borderRadius: radius.full,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+          >
+            <Svg width={24} height={24} viewBox="0 0 24 24" fill="none" accessible={false}>
+              <Path
+                d="M4 5.5C4 4.67157 4.67157 4 5.5 4H18.5C19.3284 4 20 4.67157 20 5.5V14.5C20 15.3284 19.3284 16 18.5 16H9L5.5 19V16H5.5C4.67157 16 4 15.3284 4 14.5V5.5Z"
+                stroke={colors.on_primary}
+                strokeWidth={1.8}
+                strokeLinejoin="round"
+                fill="none"
+              />
+              <Path
+                d="M8 9H16M8 12H13.5"
+                stroke={colors.on_primary}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+              />
+            </Svg>
+          </Pressable>
+        ) : null}
+      </View>
     </ScreenShell>
   );
 };
@@ -386,5 +488,15 @@ const styles = StyleSheet.create({
   tmdbAttribution: {
     textAlign: 'center',
     paddingHorizontal: 16,
+  },
+  assistantFab: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
   },
 });

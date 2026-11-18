@@ -21,4 +21,7 @@ export * from './AccountMenu';
 export * from './PhotoFade';
 export * from './MoviesEmptyState';
 export * from './SearchIcon';
+export * from './WebColumn';
+export * from './AssistantChat';
+export * from './AssistantPanel';
 

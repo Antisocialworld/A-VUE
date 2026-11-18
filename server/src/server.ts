@@ -10,6 +10,7 @@ import { checkoutRoutes } from './routes/checkout.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { cronRoutes } from './routes/cron.js';
+import { assistantRoutes } from './routes/assistant.js';
 
 export function serializeRequest(req: { id?: string; method?: string; url?: string }): {
   id?: string;
@@ -57,11 +58,31 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
   );
 
-  // Security Headers Hook (Rule 02: nosniff, frame deny, HSTS. No CORS)
+  // Web CORS: only exact configured origins are echoed. Empty list keeps prior behaviour.
+  const allowedWebOrigins = new Set(env.WEB_ALLOWED_ORIGINS ?? []);
+  fastify.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin;
+    if (typeof origin !== 'string' || !allowedWebOrigins.has(origin)) {
+      return;
+    }
+
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, Accept');
+
+    if (request.method === 'OPTIONS') {
+      reply.status(204).send();
+      return;
+    }
+  });
+
+  // Security Headers Hook (Rule 02: nosniff, frame deny, HSTS, no referrer)
   fastify.addHook('onSend', async (_request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    reply.header('Referrer-Policy', 'no-referrer');
     return payload;
   });
 
@@ -113,6 +134,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(webhookRoutes);
   await fastify.register(ticketRoutes);
   await fastify.register(cronRoutes);
+  await fastify.register(assistantRoutes);
 
   return fastify;
 }

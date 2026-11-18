@@ -24,6 +24,7 @@ import {
 } from '../schemas/cinema';
 import { STRINGS } from '../constants/strings';
 import { getSessionToken } from '../lib/secureStore';
+import { handleUnauthorized } from '../lib/sessionExpired';
 
 export class CinemaClient {
   private getBaseUrl(): string {
@@ -79,6 +80,8 @@ export class CinemaClient {
       const json = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // Authenticated call: a 401 clears the session and triggers the app's expiry flow.
+        await handleUnauthorized(response.status);
         const error = new Error(json?.error?.message || STRINGS.common.genericError) as any;
         error.code = json?.error?.code;
         error.status = response.status;
@@ -243,12 +246,14 @@ export class CinemaClient {
   }
 
   /**
-   * Requests fresh 256-bit QR reference for ticket
-   * POST /tickets/:id/qr
+   * Requests fresh 256-bit QR reference for ticket.
+   * Ticket id is sent in the JSON body, never in the URL.
+   * POST /tickets/qr
    */
   public async generateTicketQr(ticketId: string): Promise<GenerateQrResponse> {
-    const { data } = await this.request<any>(`/tickets/${ticketId}/qr`, {
+    const { data } = await this.request<any>('/tickets/qr', {
       method: 'POST',
+      body: JSON.stringify({ ticketId }),
     });
     return generateQrResponseSchema.parse(data);
   }

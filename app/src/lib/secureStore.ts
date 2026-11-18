@@ -7,8 +7,7 @@
  */
 
 import { STRINGS } from '../constants/strings';
-
-const SESSION_TOKEN_KEY = 'avue_session_token';
+import { SESSION_TOKEN_KEY } from './sessionTokenKey';
 
 let memoryFallbackToken: string | null = null;
 

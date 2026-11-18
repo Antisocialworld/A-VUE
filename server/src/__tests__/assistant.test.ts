@@ -1,0 +1,835 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockGetSessionUser = vi.fn();
+const mockAssistantRateLimit = vi.fn();
+const mockGenerate = vi.fn();
+const mockGenerateContent = vi.fn();
+const mockGoogleGenAI = vi.fn();
+
+vi.mock('../lib/session.js', () => ({
+  getSessionUser: (...args: unknown[]) => mockGetSessionUser(...args),
+  UnauthorizedError: class UnauthorizedError extends Error {
+    constructor(message = 'Unauthorized') {
+      super(message);
+      this.name = 'UnauthorizedError';
+    }
+  },
+}));
+
+vi.mock('../lib/rateLimit.js', async () => {
+  const actual = await vi.importActual<any>('../lib/rateLimit.js');
+  return {
+    ...actual,
+    assistantRateLimit: (...args: unknown[]) => mockAssistantRateLimit(...args),
+  };
+});
+
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: function GoogleGenAI(this: any, opts: any) {
+    mockGoogleGenAI(opts);
+    this.models = {
+      generateContent: (...args: unknown[]) => mockGenerateContent(...args),
+    };
+  },
+}));
+
+const baseEnv = {
+  NODE_ENV: 'test',
+  PORT: 3000,
+  HOST: '0.0.0.0',
+  TRUST_PROXY: false,
+  REQUEST_TIMEOUT_MS: 10000,
+  BODY_LIMIT_KB: 100,
+  GEMINI_API_KEY: 'test-key',
+  GEMINI_CHAT_MODEL: 'gemini-test-model',
+  GEMINI_ATTEMPT_TIMEOUT_MS: 8000,
+  GEMINI_EMBEDDING_MODEL: 'gemini-embedding-2',
+  EMBEDDING_DIMENSIONS: 768,
+};
+
+async function buildTestServer(envOverrides: Record<string, unknown> = {}) {
+  vi.resetModules();
+
+  vi.doMock('../env.js', () => ({
+    env: { ...baseEnv, ...envOverrides },
+    isAdmin: () => false,
+    getTmdbToken: () => undefined,
+    getSearchCacheTtlSeconds: () => 600,
+  }));
+
+  vi.doMock('../lib/session.js', () => ({
+    getSessionUser: (...args: unknown[]) => mockGetSessionUser(...args),
+    UnauthorizedError: class UnauthorizedError extends Error {
+      constructor(message = 'Unauthorized') {
+        super(message);
+        this.name = 'UnauthorizedError';
+      }
+    },
+  }));
+
+  vi.doMock('../lib/rateLimit.js', async () => {
+    const actual = await vi.importActual<any>('../lib/rateLimit.js');
+    return {
+      ...actual,
+      assistantRateLimit: (...args: unknown[]) => mockAssistantRateLimit(...args),
+    };
+  });
+
+  // Keep other routes from needing external services during tests where possible.
+  vi.doMock('../routes/health.js', () => ({ healthRoutes: async () => {} }));
+  vi.doMock('../routes/dev.js', () => ({ devRoutes: async () => {} }));
+  vi.doMock('../routes/auth.js', () => ({ authRoutes: async () => {} }));
+  vi.doMock('../routes/movies.js', () => ({ movieRoutes: async () => {} }));
+  vi.doMock('../routes/showtimes.js', () => ({ showtimeRoutes: async () => {} }));
+  vi.doMock('../routes/checkout.js', () => ({ checkoutRoutes: async () => {} }));
+  vi.doMock('../routes/webhooks.js', () => ({ webhookRoutes: async () => {} }));
+  vi.doMock('../routes/tickets.js', () => ({ ticketRoutes: async () => {} }));
+  vi.doMock('../routes/cron.js', () => ({ cronRoutes: async () => {} }));
+
+  vi.doMock('../lib/assistant/model.js', async () => {
+    const actual = await vi.importActual<any>('../lib/assistant/model.js');
+    return {
+      ...actual,
+      generate: (...args: unknown[]) => mockGenerate(...args),
+    };
+  });
+
+  const { buildServer } = await import('../server.js');
+  return buildServer();
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Reset queued once-values too, so a mock from one test cannot leak into the next.
+  mockGenerate.mockReset();
+  mockGenerateContent.mockReset();
+  mockGetSessionUser.mockResolvedValue({ id: 'user-123', email: 'user@example.com', status: 'active' });
+  mockAssistantRateLimit.mockResolvedValue(true);
+  mockGenerate.mockResolvedValue('Hello from A VUE.');
+  mockGenerateContent.mockResolvedValue({ text: 'Hello from A VUE.' });
+});
+
+// Cold-loads Fastify/Zod/pg/Redis/TMDB/Gemini through buildTestServer(). Without a
+// warm-up the first test pays that cost inside its own 5 s deadline and times out.
+beforeAll(async () => {
+  const warmupServer = await buildTestServer();
+  await warmupServer.close();
+}, 20000);
+
+describe('Ask A VUE assistant route', () => {
+  it('requires auth (401) and does not call generate', async () => {
+    mockGetSessionUser.mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { name: 'UnauthorizedError' }));
+    const server = await buildTestServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Hi' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('returns 429 when rate limited', async () => {
+    mockAssistantRateLimit.mockImplementationOnce(async (_req: any, reply: any) => {
+      reply.status(429).send({
+        error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.', requestId: _req.id },
+      });
+      return false;
+    });
+    const server = await buildTestServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Hi' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('validates message and history limits (400)', async () => {
+    const server = await buildTestServer();
+    const tooLong = 'a'.repeat(301);
+    const res1 = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: tooLong } });
+    expect(res1.statusCode).toBe(400);
+    expect(res1.json().error.code).toBe('VALIDATION_ERROR');
+
+    const res2 = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: {
+        message: 'Hi',
+        history: [
+          { role: 'user', text: '1' },
+          { role: 'assistant', text: '2' },
+          { role: 'user', text: '3' },
+          { role: 'assistant', text: '4' },
+          { role: 'user', text: '5' },
+        ],
+      },
+    });
+    expect(res2.statusCode).toBe(400);
+
+    const res3 = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Hi', history: [{ role: 'assistant', text: 'x'.repeat(601) }] },
+    });
+    expect(res3.statusCode).toBe(400);
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('returns 503 when GEMINI_API_KEY or GEMINI_CHAT_MODEL is missing (friendly, no raw Gemini text)', async () => {
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.message).toMatch(/not available/i);
+    expect(JSON.stringify(res.json())).not.toContain('google');
+    await server.close();
+  });
+
+  it('passes system prompt with Lagos date/contact, capped history, and no user fields to generate', async () => {
+    const server = await buildTestServer();
+    const payload = {
+      message: 'How do I book tickets?',
+      history: [
+        { role: 'user' as const, text: 'Hi' },
+        { role: 'assistant' as const, text: 'Hello' },
+      ],
+    };
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Hello from A VUE.' });
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    const call = mockGenerate.mock.calls[0][0];
+    expect(call.message).toBe(payload.message);
+    expect(call.history).toEqual(payload.history);
+    expect(call.system).toContain('Today in Lagos is');
+    expect(call.system).toContain('0800 000 0000');
+    expect(call.system).not.toContain('user-123');
+    expect(call.system).not.toContain('user@example.com');
+    expect(call.system).not.toContain('GEMINI');
+    await server.close();
+  });
+
+  it('other-vue message returns fixed refusal with no model call and no message text in logs', async () => {
+    const { SCOPE_REFUSAL_TEXT } = await import('../lib/assistant/scopeGuard.js');
+    const server = await buildTestServer();
+    const infoCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, _reply, done) => {
+      const origInfo = req.log.info.bind(req.log);
+      (req.log as any).info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        infoCalls.push([obj, msg]);
+        return (origInfo as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'how do I use Vue.js' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: SCOPE_REFUSAL_TEXT });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    const scopeLogCalls = infoCalls.filter((c) => c[1] === 'assistant_scope_verdict');
+    expect(scopeLogCalls.length).toBeGreaterThan(0);
+    for (const call of scopeLogCalls) {
+      expect(call[0]).toMatchObject({ verdict: 'other-vue' });
+      expect(JSON.stringify(call)).not.toContain('how do I use Vue.js');
+    }
+    await server.close();
+  });
+
+  it('ok brand-variant message makes exactly one model call with normalised text and normalised user history', async () => {
+    const server = await buildTestServer();
+    const infoCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, _reply, done) => {
+      const origInfo = req.log.info.bind(req.log);
+      (req.log as any).info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        infoCalls.push([obj, msg]);
+        return (origInfo as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: {
+        message: 'how do i book at avue',
+        history: [
+          { role: 'user', text: 'a view tonight?' },
+          { role: 'assistant', text: 'Earlier reply' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    const call = mockGenerate.mock.calls[0][0];
+    expect(call.message).toBe('how do i book at A VUE');
+    expect(call.history).toEqual([
+      { role: 'user', text: 'A VUE tonight?' },
+      { role: 'assistant', text: 'Earlier reply' },
+    ]);
+    const scopeLogCalls = infoCalls.filter((c) => c[1] === 'assistant_scope_verdict');
+    expect(scopeLogCalls.length).toBeGreaterThan(0);
+    for (const callArgs of scopeLogCalls) {
+      expect(callArgs[0]).toMatchObject({ verdict: 'ok' });
+      expect(JSON.stringify(callArgs)).not.toContain('how do i book at avue');
+      expect(JSON.stringify(callArgs)).not.toContain('a view tonight?');
+    }
+    const factsLogCalls = infoCalls.filter((c) => c[1] === 'assistant_facts_verdict');
+    expect(factsLogCalls).toHaveLength(1);
+    expect(factsLogCalls[0][0]).toEqual({ verdict: 'ok' });
+    expect(JSON.stringify(factsLogCalls[0])).not.toContain('how do i book at avue');
+    await server.close();
+  });
+
+  it('deterministically gates live-fact lookups with a fixed reply and verdict-only logs', async () => {
+    const { FACTS_REFUSAL_TEXT } = await import('../lib/assistant/factsGate.js');
+    const server = await buildTestServer();
+    const infoCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, _reply, done) => {
+      const origInfo = req.log.info.bind(req.log);
+      (req.log as any).info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        infoCalls.push([obj, msg]);
+        return (origInfo as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const message = 'What are your opening hours?';
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: FACTS_REFUSAL_TEXT });
+    expect(res.json().reply).toContain('0800 000 0000');
+    expect(mockGenerate).not.toHaveBeenCalled();
+
+    const factsLogCalls = infoCalls.filter((c) => c[1] === 'assistant_facts_verdict');
+    expect(factsLogCalls).toHaveLength(1);
+    expect(factsLogCalls[0][0]).toEqual({ verdict: 'needs-facts' });
+    expect(Object.keys(factsLogCalls[0][0] as Record<string, unknown>).sort()).toEqual(['verdict']);
+    expect(JSON.stringify(factsLogCalls[0])).not.toContain(message);
+    await server.close();
+  });
+
+  it('gates suggested fact prompts and documented live-fact keywords while allowing procedural questions', async () => {
+    const { checkFacts, FACT_KEYWORDS } = await import('../lib/assistant/factsGate.js');
+    expect(FACT_KEYWORDS.length).toBeGreaterThan(0);
+
+    const blocked = [
+      'Refund policy',
+      'Opening hours',
+      'Age ratings',
+      'What movies are on?',
+      'whats on at avue',
+      'Ticket prices',
+      'Where is A VUE?',
+      'Showtimes today',
+      'My booking status',
+      'Can I cancel my ticket?',
+    ];
+    for (const message of blocked) {
+      expect(checkFacts(message).kind).toBe('needs-facts');
+    }
+
+    const allowed = ['Hi', 'How do I book tickets?', 'How do I use the app?', 'Thank you'];
+    for (const message of allowed) {
+      expect(checkFacts(message).kind).toBe('ok');
+    }
+  });
+
+  it('maps Gemini rate limit to friendly 429 and does not leak raw error text', async () => {
+    const server = await buildTestServer();
+    const { AssistantRateLimitedError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(new AssistantRateLimitedError('RESOURCE_EXHAUSTED secret', 429));
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(429);
+    expect(res.json().error.message).toBe('Ask A VUE is busy right now. Try again shortly.');
+    expect(JSON.stringify(res.json())).not.toContain('RESOURCE_EXHAUSTED');
+    expect(JSON.stringify(res.json())).not.toContain('secret');
+    await server.close();
+  });
+
+  it('maps empty/blocked or Gemini failure to friendly 502 and does not leak raw error text', async () => {
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(new AssistantGenerationError('SAFETY blocked raw detail'));
+    const server = await buildTestServer();
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error.message).toMatch(/could not respond/i);
+    expect(JSON.stringify(res.json())).not.toContain('SAFETY');
+    expect(JSON.stringify(res.json())).not.toContain('raw detail');
+    await server.close();
+  });
+});
+
+describe('assistant model and prompt', () => {
+  it('buildSystemPrompt includes Lagos date and placeholder contact, plain text', async () => {
+    vi.resetModules();
+    const { buildSystemPrompt, ASSISTANT_SUPPORT_CONTACT } = await import('../lib/assistant/systemPrompt.js');
+    const prompt = buildSystemPrompt('Wednesday 18 November 2026');
+    expect(ASSISTANT_SUPPORT_CONTACT).toBe('0800 000 0000');
+    expect(prompt).toContain('Wednesday 18 November 2026');
+    expect(prompt).toContain('0800 000 0000');
+    expect(prompt).not.toMatch(/[*_`#\[\]]/); // no Markdown markers
+  });
+
+  it('prompt restricts facts to prompt data, forbids tool promises and branch guessing, points to in-app screens, and caps replies at 3 sentences', async () => {
+    vi.resetModules();
+    const { buildSystemPrompt } = await import('../lib/assistant/systemPrompt.js');
+    const prompt = buildSystemPrompt('Wednesday 18 November 2026');
+
+    const requiredFragments = [
+      'State a fact only if it is written in the prompt data.',
+      'opening hours, prices, locations or branches, refund or cancellation terms, showtimes, age ratings, and what is playing',
+      'say it cannot be confirmed here and point to the A VUE support contact above',
+      'Never guess and never give typical values.',
+      'You have no tools.',
+      'Never offer or promise to check, look up, book, cancel or refund anything',
+      'never say "I will check"',
+      'Do not ask the user which branch or location they mean',
+      'do not assume more than one branch exists',
+      'Do not say "check the A VUE app"',
+      'open the Showtimes or Tickets screens',
+      'Keep replies short, at most 3 sentences, in plain text.',
+      'cinema opening hours',
+      '0800 000 0000',
+    ];
+    for (const fragment of requiredFragments) {
+      expect(prompt).toContain(fragment);
+    }
+    expect(prompt).not.toMatch(/[*_`#\[\]]/); // no Markdown markers
+  });
+
+  it('generate maps assistant history role to model and sets system/temperature/tokens/timeout, thinking, and one attempt', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any, opts: any) {
+        mockGoogleGenAI(opts);
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockResolvedValueOnce({ text: 'Reply' });
+    const { generate } = await import('../lib/assistant/model.js');
+    const out = await generate({
+      system: 'sys',
+      history: [
+        { role: 'user', text: 'u1' },
+        { role: 'assistant', text: 'a1' },
+      ],
+      message: 'm',
+    });
+    expect(out).toBe('Reply');
+    expect(mockGoogleGenAI).toHaveBeenCalledWith({ apiKey: 'test-key' });
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    const arg = mockGenerateContent.mock.calls[0][0];
+    expect(arg.model).toBe('gemini-test-model');
+    expect(arg.config.systemInstruction).toBe('sys');
+    expect(arg.config.temperature).toBe(0.3);
+    expect(arg.config.maxOutputTokens).toBe(600);
+    expect(arg.config.thinkingConfig).toEqual({ thinkingBudget: 0 });
+    expect(arg.config.httpOptions.timeout).toBe(8000);
+    expect(arg.config.httpOptions.retryOptions.attempts).toBe(1);
+    expect(arg.config.tools).toBeUndefined();
+    expect(arg.config.toolConfig).toBeUndefined();
+    expect(arg.contents).toEqual([
+      { role: 'user', parts: [{ text: 'u1' }] },
+      { role: 'model', parts: [{ text: 'a1' }] },
+      { role: 'user', parts: [{ text: 'm' }] },
+    ]);
+  });
+
+  it('generate throws typed error on empty/blocked reply', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any) {
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockResolvedValueOnce({ text: '' });
+    const mod = await import('../lib/assistant/model.js');
+    await expect(mod.generate({ system: 's', history: [], message: 'm' })).rejects.toBeInstanceOf(mod.AssistantGenerationError);
+  });
+
+  it('cuts truncated MAX_TOKENS reply to the last full sentence', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any) {
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockResolvedValueOnce({
+      text: 'First sentence. Second sentence is cut mid',
+      candidates: [{ finishReason: 'MAX_TOKENS' }],
+    });
+    const mod = await import('../lib/assistant/model.js');
+    const out = await mod.generate({ system: 's', history: [], message: 'm' });
+    expect(out).toBe('First sentence.');
+  });
+
+  it('treats MAX_TOKENS reply with no full sentence as empty-reply generation error', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any) {
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockResolvedValueOnce({
+      text: 'Hello Welcome to A VUE How can',
+      candidates: [{ finishReason: 'MAX_TOKENS' }],
+    });
+    const mod = await import('../lib/assistant/model.js');
+    await expect(mod.generate({ system: 's', history: [], message: 'm' })).rejects.toBeInstanceOf(mod.AssistantGenerationError);
+  });
+
+  it('treats Gemini 429 as retryable while 400, 401, 403 and 404 stay non-retryable', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    const mod = await import('../lib/assistant/model.js');
+
+    expect(mod.isRetryableServerError(new mod.AssistantRateLimitedError('busy', 429))).toBe(true);
+    expect(mod.isRetryableServerError({ status: 429 })).toBe(true);
+    for (const status of [400, 401, 403, 404]) {
+      expect(mod.isRetryableServerError(new mod.AssistantGenerationError('bad request', { status }))).toBe(false);
+    }
+  });
+
+  it('rejects with a retryable timeout when its own deadline fires on a hung SDK call', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any) {
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockImplementationOnce(() => new Promise(() => {}));
+    const mod = await import('../lib/assistant/model.js');
+    await expect(
+      mod.generate({ system: 's', history: [], message: 'm', timeoutMs: 20, attempt: 'primary' }),
+    ).rejects.toBeInstanceOf(mod.AssistantTimeoutError);
+    expect(mod.isRetryableServerError(new mod.AssistantTimeoutError())).toBe(true);
+    expect(mod.isRetryableServerError({ error: { code: 504, status: 'DEADLINE_EXCEEDED' } })).toBe(true);
+  });
+});
+
+describe('assistant fallback and failure logging', () => {
+  it('uses fallback model on 503 UNAVAILABLE failure and returns fallback reply', async () => {
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate
+      .mockRejectedValueOnce(new AssistantGenerationError('primary failed', { status: 503 }))
+      .mockResolvedValueOnce('Fallback reply');
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Fallback reply' });
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenerate.mock.calls[0][0].model).toBe('gemini-test-model');
+    expect(mockGenerate.mock.calls[0][0].attempt).toBe('primary');
+    expect(mockGenerate.mock.calls[1][0].model).toBe('gemini-fallback-model');
+    expect(mockGenerate.mock.calls[1][0].attempt).toBe('fallback');
+    expect(mockGenerate.mock.calls[0][0].timeoutMs).toBe(8000);
+    expect(mockGenerate.mock.calls[1][0].timeoutMs).toBe(8000);
+    await server.close();
+  });
+
+  it('uses the configured timeout and caps the fallback so both attempts stay under the app 25 s deadline', async () => {
+    const realNow = Date.now;
+    let elapsedOffsetMs = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + elapsedOffsetMs);
+    let server: Awaited<ReturnType<typeof buildTestServer>> | undefined;
+
+    try {
+      server = await buildTestServer({
+        GEMINI_FALLBACK_MODEL: 'gemini-fallback-model',
+        GEMINI_ATTEMPT_TIMEOUT_MS: 15000,
+      });
+      const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+      mockGenerate
+        .mockImplementationOnce(async () => {
+          elapsedOffsetMs = 15000;
+          throw new AssistantGenerationError('slow primary failed', { status: 503 });
+        })
+        .mockResolvedValueOnce('Fallback reply');
+
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ reply: 'Fallback reply' });
+      expect(mockGenerate).toHaveBeenCalledTimes(2);
+      expect(mockGenerate.mock.calls[0][0].timeoutMs).toBe(15000);
+      // Primary used 15 s, so the fallback is capped to 24 s total, inside the app's 25 s abort.
+      expect(mockGenerate.mock.calls[1][0].timeoutMs).toBe(9000);
+      expect(15000 + mockGenerate.mock.calls[1][0].timeoutMs).toBeLessThan(25000);
+    } finally {
+      if (server) await server.close();
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('uses fallback on 504 DEADLINE_EXCEEDED and on an abort without a numeric status', async () => {
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    const primaryErrors: unknown[] = [
+      new AssistantGenerationError('{"error":{"code":504,"status":"DEADLINE_EXCEEDED"}}', { status: 504 }),
+      Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }),
+    ];
+    for (const primaryError of primaryErrors) {
+      mockGenerate.mockReset();
+      mockGenerate.mockRejectedValueOnce(primaryError).mockResolvedValueOnce('Fallback reply');
+      const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ reply: 'Fallback reply' });
+      expect(mockGenerate).toHaveBeenCalledTimes(2);
+      expect(mockGenerate.mock.calls[1][0].model).toBe('gemini-fallback-model');
+      expect(mockGenerate.mock.calls[1][0].attempt).toBe('fallback');
+      await server.close();
+    }
+  });
+
+  it('uses fallback when our own primary timeout fires', async () => {
+    const { AssistantTimeoutError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(new AssistantTimeoutError()).mockResolvedValueOnce('Fallback reply');
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Fallback reply' });
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenerate.mock.calls[0][0].attempt).toBe('primary');
+    expect(mockGenerate.mock.calls[1][0].attempt).toBe('fallback');
+    await server.close();
+  });
+
+  it('returns the friendly error and completes when both attempts fail', async () => {
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate
+      .mockRejectedValueOnce(new AssistantGenerationError('raw primary 504 detail', { status: 504 }))
+      .mockRejectedValueOnce(new AssistantGenerationError('raw fallback 503 detail', { status: 503 }));
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+    const infoCalls: Array<[unknown, unknown]> = [];
+    const warnCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, reply, done) => {
+      const origInfo = reply.log.info.bind(reply.log);
+      const origWarn = reply.log.warn.bind(reply.log);
+      (reply.log as any).info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        infoCalls.push([obj, msg]);
+        return (origInfo as any)(obj, msg, ...rest);
+      };
+      (reply.log as any).warn = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        warnCalls.push([obj, msg]);
+        return (origWarn as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error.message).toMatch(/could not respond/i);
+    expect(JSON.stringify(res.json())).not.toContain('raw primary');
+    expect(JSON.stringify(res.json())).not.toContain('raw fallback');
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    const failures = warnCalls.filter((c) => c[1] === 'assistant_generate_failed');
+    expect(failures).toHaveLength(2);
+    expect(failures.map((c) => (c[0] as { attempt?: unknown }).attempt)).toEqual(['primary', 'fallback']);
+    for (const call of failures) {
+      expect(JSON.stringify(call)).not.toContain('raw primary 504 detail');
+      expect(JSON.stringify(call)).not.toContain('raw fallback 503 detail');
+    }
+    expect(infoCalls.some((c) => c[1] === 'request completed')).toBe(true);
+    await server.close();
+  });
+
+  it('logs one success line per attempt with attempt and model and no message text', async () => {
+    const server = await buildTestServer();
+    const infoCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, reply, done) => {
+      const origInfo = reply.log.info.bind(reply.log);
+      (reply.log as any).info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        infoCalls.push([obj, msg]);
+        return (origInfo as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'secret user question', history: [{ role: 'user', text: 'secret history' }] },
+    });
+    expect(res.statusCode).toBe(200);
+    const successLogs = infoCalls.filter((c) => c[1] === 'assistant_generate_ok');
+    expect(successLogs).toHaveLength(1);
+    expect(successLogs[0][0]).toMatchObject({
+      attempt: 'primary',
+      model: 'gemini-test-model',
+      outcome: 'ok',
+    });
+    expect((successLogs[0][0] as { latencyMs?: unknown }).latencyMs).toEqual(expect.any(Number));
+    expect(JSON.stringify(successLogs[0])).not.toContain('secret user question');
+    expect(JSON.stringify(successLogs[0])).not.toContain('secret history');
+    expect(infoCalls.some((c) => c[1] === 'request completed')).toBe(true);
+    await server.close();
+  });
+
+  it('does not use fallback on 400, 401, 403, or 404', async () => {
+    const statuses = [400, 401, 403, 404] as const;
+    for (const status of statuses) {
+      mockGenerate.mockReset();
+      const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+      const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+      mockGenerate.mockRejectedValueOnce(new AssistantGenerationError(`status ${status}`, { status }));
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+      expect(res.statusCode).toBe(502);
+      expect(mockGenerate).toHaveBeenCalledTimes(1);
+      await server.close();
+    }
+  });
+
+  it('uses the fallback once when Gemini returns 429 on the primary model', async () => {
+    const { AssistantRateLimitedError } = await import('../lib/assistant/model.js');
+    mockGenerate
+      .mockRejectedValueOnce(new AssistantRateLimitedError('RESOURCE_EXHAUSTED raw primary detail', 429))
+      .mockResolvedValueOnce('Fallback reply');
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Fallback reply' });
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenerate.mock.calls[0][0].model).toBe('gemini-test-model');
+    expect(mockGenerate.mock.calls[0][0].attempt).toBe('primary');
+    expect(mockGenerate.mock.calls[1][0].model).toBe('gemini-fallback-model');
+    expect(mockGenerate.mock.calls[1][0].attempt).toBe('fallback');
+    expect(mockGenerate.mock.calls[0][0].timeoutMs).toBe(8000);
+    expect(mockGenerate.mock.calls[1][0].timeoutMs).toBe(8000);
+    expect(JSON.stringify(res.json())).not.toContain('RESOURCE_EXHAUSTED');
+    expect(JSON.stringify(res.json())).not.toContain('raw primary detail');
+    await server.close();
+  });
+
+  it('returns the friendly 429 and logs both attempts when Gemini 429s both models', async () => {
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
+    // buildTestServer() resets modules, so import AFTER it: the route's `instanceof`
+    // check must see the same AssistantRateLimitedError class instance as this test.
+    const { AssistantRateLimitedError } = await import('../lib/assistant/model.js');
+    mockGenerate
+      .mockRejectedValueOnce(new AssistantRateLimitedError('raw primary 429 detail', 429))
+      .mockRejectedValueOnce(new AssistantRateLimitedError('raw fallback 429 detail', 429));
+    const warnCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, reply, done) => {
+      const origWarn = reply.log.warn.bind(reply.log);
+      (reply.log as any).warn = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        warnCalls.push([obj, msg]);
+        return (origWarn as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+
+    expect(res.statusCode).toBe(429);
+    expect(res.json().error.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(res.json().error.message).toBe('Ask A VUE is busy right now. Try again shortly.');
+    expect(JSON.stringify(res.json())).not.toContain('raw primary 429 detail');
+    expect(JSON.stringify(res.json())).not.toContain('raw fallback 429 detail');
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+
+    const failures = warnCalls.filter((c) => c[1] === 'assistant_generate_failed');
+    expect(failures).toHaveLength(2);
+    expect(failures.map((c) => (c[0] as { attempt?: unknown }).attempt)).toEqual(['primary', 'fallback']);
+    for (const call of failures) {
+      expect(Object.keys(call[0] as Record<string, unknown>).sort()).toEqual([
+        'attempt',
+        'finishReason',
+        'latencyMs',
+        'model',
+        'outcome',
+        'statusCode',
+      ]);
+      expect((call[0] as { statusCode?: unknown }).statusCode).toBe(429);
+      expect(JSON.stringify(call)).not.toContain('raw primary 429 detail');
+      expect(JSON.stringify(call)).not.toContain('raw fallback 429 detail');
+    }
+    await server.close();
+  });
+
+  it('makes no second call when fallback is not set', async () => {
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(new AssistantGenerationError('unavailable', { status: 503 }));
+    const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: undefined });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    expect(res.statusCode).toBe(502);
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    await server.close();
+  });
+
+  it('logs failure metadata without message text, history, key, or raw error body', async () => {
+    const server = await buildTestServer();
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(
+      new AssistantGenerationError('RAW_PROVIDER_BODY secret-key', {
+        status: 503,
+        finishReason: 'STOP',
+        latencyMs: 123,
+      }),
+    );
+    const warnCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req, _reply, done) => {
+      const origWarn = req.log.warn.bind(req.log);
+      (req.log as any).warn = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        warnCalls.push([obj, msg]);
+        return (origWarn as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'secret user message', history: [{ role: 'user', text: 'secret history' }] },
+    });
+    expect(res.statusCode).toBe(502);
+    const failureLogs = warnCalls.filter((c) => c[1] === 'assistant_generate_failed');
+    expect(failureLogs.length).toBeGreaterThan(0);
+    for (const call of failureLogs) {
+      expect(call[0]).toMatchObject({
+        attempt: 'primary',
+        model: 'gemini-test-model',
+        statusCode: 503,
+        finishReason: 'STOP',
+      });
+      expect((call[0] as { latencyMs?: unknown }).latencyMs).toEqual(expect.any(Number));
+      expect(JSON.stringify(call)).not.toContain('secret user message');
+      expect(JSON.stringify(call)).not.toContain('secret history');
+      expect(JSON.stringify(call)).not.toContain('RAW_PROVIDER_BODY');
+      expect(JSON.stringify(call)).not.toContain('test-key');
+    }
+    await server.close();
+  });
+});
+
+describe('.env.example assistant entries', () => {
+  it('contains Gemini assistant entries with fallback key and updated chat model example', () => {
+    const envExamplePath = path.resolve(__dirname, '../../.env.example');
+    const content = fs.readFileSync(envExamplePath, 'utf-8');
+    expect(content).toContain('GEMINI_API_KEY=');
+    expect(content).toMatch(/^GEMINI_API_KEY=\s*$/m);
+    expect(content).toContain('GEMINI_CHAT_MODEL=gemini-3.6-flash');
+    expect(content).toContain('GEMINI_FALLBACK_MODEL=');
+    expect(content).toMatch(/^GEMINI_FALLBACK_MODEL=\s*$/m);
+    expect(content).toContain('GEMINI_EMBEDDING_MODEL=gemini-embedding-2');
+    expect(content).toContain('EMBEDDING_DIMENSIONS=768');
+  });
+});

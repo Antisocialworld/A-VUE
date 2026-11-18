@@ -31,6 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: config.orientation || 'portrait',
     userInterfaceStyle: config.userInterfaceStyle || 'automatic',
     icon: config.icon || './assets/logo/a-vue-icon-1024.png',
+    web: config.web ?? { bundler: 'metro', output: 'single' },
     android: {
       ...config.android,
       package: 'app.avuemovies',

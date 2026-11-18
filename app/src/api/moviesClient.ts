@@ -9,6 +9,7 @@ import {
 } from '../schemas/movies';
 import { STRINGS } from '../constants/strings';
 import { getSessionToken } from '../lib/secureStore';
+import { handleUnauthorized } from '../lib/sessionExpired';
 
 export class MoviesClient {
   private getBaseUrl(): string {
@@ -71,6 +72,8 @@ export class MoviesClient {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // Only an authenticated 401 ends the session; ordinary errors and public calls are unchanged.
+        await handleUnauthorized(response.status);
         const errorMsg = data?.error?.message || STRINGS.common.genericError;
         const error = new Error(errorMsg) as any;
         error.code = data?.error?.code;

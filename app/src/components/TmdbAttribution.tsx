@@ -16,8 +16,10 @@ const tmdbLogoSource = require('../../assets/tmdb/tmdb-logo.png');
 // Rendered height about 24 pt; visibly less prominent than the A VUE mark / title
 export const TMDB_LOGO_HEIGHT = 24;
 
-// Dynamically resolve real pixel dimensions from asset (owner-supplied 851x199, ~4.28:1)
-const resolvedAsset = Image.resolveAssetSource(tmdbLogoSource);
+// Dynamically resolve real pixel dimensions from asset (owner-supplied 851x199, ~4.28:1).
+// react-native-web has no Image.resolveAssetSource, so call it optionally; web and
+// any missing implementation keep the 851x199 fallback. Native behaviour is unchanged.
+const resolvedAsset = Image.resolveAssetSource?.(tmdbLogoSource);
 const realWidth = resolvedAsset?.width && resolvedAsset.width > 0 ? resolvedAsset.width : 851;
 const realHeight = resolvedAsset?.height && resolvedAsset.height > 0 ? resolvedAsset.height : 199;
 export const TMDB_LOGO_WIDTH = TMDB_LOGO_HEIGHT * (realWidth / realHeight);

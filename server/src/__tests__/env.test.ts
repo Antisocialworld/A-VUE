@@ -114,5 +114,75 @@ describe('Server Environment Validation (Rule 02)', () => {
       expect(err.message).not.toContain('dummy_hash');
     }
   });
+
+  it('keeps assistant rate limit defaults unchanged (10 user/min, 30 IP/min)', () => {
+    const env = validateEnv(validBaseEnv);
+    expect(env.ASSISTANT_RATE_USER_PER_MIN).toBe(10);
+    expect(env.ASSISTANT_RATE_IP_PER_MIN).toBe(30);
+  });
+
+  it('applies assistant rate limit overrides when valid', () => {
+    const env = validateEnv({
+      ...validBaseEnv,
+      ASSISTANT_RATE_USER_PER_MIN: '20',
+      ASSISTANT_RATE_IP_PER_MIN: '45',
+    });
+    expect(env.ASSISTANT_RATE_USER_PER_MIN).toBe(20);
+    expect(env.ASSISTANT_RATE_IP_PER_MIN).toBe(45);
+  });
+
+  it('fails env validation for invalid assistant rate limit values (positive integers only, max 600)', () => {
+    expect(() => validateEnv({ ...validBaseEnv, ASSISTANT_RATE_USER_PER_MIN: '0' })).toThrowError(/ASSISTANT_RATE_USER_PER_MIN/);
+    expect(() => validateEnv({ ...validBaseEnv, ASSISTANT_RATE_IP_PER_MIN: '0' })).toThrowError(/ASSISTANT_RATE_IP_PER_MIN/);
+    expect(() => validateEnv({ ...validBaseEnv, ASSISTANT_RATE_USER_PER_MIN: '-1' })).toThrowError(/ASSISTANT_RATE_USER_PER_MIN/);
+    expect(() => validateEnv({ ...validBaseEnv, ASSISTANT_RATE_IP_PER_MIN: '601' })).toThrowError(/ASSISTANT_RATE_IP_PER_MIN/);
+    expect(() => validateEnv({ ...validBaseEnv, ASSISTANT_RATE_USER_PER_MIN: '1.5' })).toThrowError(/ASSISTANT_RATE_USER_PER_MIN/);
+  });
+
+  it('accepts optional GEMINI_FALLBACK_MODEL with no default', () => {
+    const withoutFallback = validateEnv(validBaseEnv) as any;
+    expect(withoutFallback.GEMINI_FALLBACK_MODEL).toBeUndefined();
+
+    const withFallback = validateEnv({
+      ...validBaseEnv,
+      GEMINI_FALLBACK_MODEL: 'gemini-fallback-test',
+    }) as any;
+    expect(withFallback.GEMINI_FALLBACK_MODEL).toBe('gemini-fallback-test');
+  });
+
+  it('defaults WEB_ALLOWED_ORIGINS to empty and parses trimmed exact origins', () => {
+    expect(validateEnv(validBaseEnv).WEB_ALLOWED_ORIGINS).toEqual([]);
+
+    const withOrigins = validateEnv({
+      ...validBaseEnv,
+      WEB_ALLOWED_ORIGINS: ' https://cinema.example , http://localhost:19006 ',
+    });
+    expect(withOrigins.WEB_ALLOWED_ORIGINS).toEqual([
+      'https://cinema.example',
+      'http://localhost:19006',
+    ]);
+  });
+
+  it('refuses wildcard web origins', () => {
+    expect(() =>
+      validateEnv({ ...validBaseEnv, WEB_ALLOWED_ORIGINS: '*' }),
+    ).toThrowError(/WEB_ALLOWED_ORIGINS/);
+  });
+
+  it('defaults the assistant attempt timeout to 8000 ms, including a blank documented value', () => {
+    expect(validateEnv(validBaseEnv).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '   ' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
+  });
+
+  it('applies a valid assistant attempt timeout override and rejects values outside 2000-15000 ms', () => {
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '15000' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(15000);
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '2000' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(2000);
+    for (const value of ['1999', '15001', '1.5', 'oops']) {
+      expect(() => validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: value })).toThrowError(
+        /GEMINI_ATTEMPT_TIMEOUT_MS/,
+      );
+    }
+  });
 });
 

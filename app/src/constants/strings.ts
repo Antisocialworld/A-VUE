@@ -373,5 +373,25 @@ export const STRINGS = {
     textButton: 'Text Button',
     backToAuth: 'Back to Auth',
   },
+
+  assistant: {
+    title: 'Ask A VUE',
+    notice: 'Do not type personal details. Questions are sent to an AI service.',
+    suggestions: {
+      refundPolicy: 'Refund policy',
+      openingHours: 'Opening hours',
+      ageRatings: 'Age ratings',
+    },
+    inputPlaceholder: 'Ask a question',
+    inputLabel: 'Message',
+    sendAction: 'Send message',
+    typing: 'Typing...',
+    fabAccessibilityLabel: 'Ask A VUE assistant',
+    errors: {
+      tooMany: 'Ask A VUE is busy right now. Try again shortly.',
+      badRequest: 'That message could not be sent.',
+      unavailable: 'The assistant is unavailable right now. Try again later.',
+    },
+  },
 } as const;
 

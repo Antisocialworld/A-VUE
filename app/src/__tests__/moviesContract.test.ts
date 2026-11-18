@@ -169,8 +169,11 @@ describe('MoviesHomeScreen & MovieDetailScreen TMDB Attribution (Task B)', () =>
     expect(attributionSource).not.toContain('7.7');
     expect(attributionSource).not.toContain('height: 16');
 
-    // Verifies dynamic resolution and ratio calculation
-    expect(attributionSource).toContain('Image.resolveAssetSource(tmdbLogoSource)');
+    // Verifies safe dynamic resolution and ratio calculation (web has no resolveAssetSource)
+    expect(attributionSource).toContain('Image.resolveAssetSource?.(tmdbLogoSource)');
+    expect(attributionSource).not.toContain('Image.resolveAssetSource(tmdbLogoSource)');
+    expect(attributionSource).toContain('? resolvedAsset.width : 851');
+    expect(attributionSource).toContain('? resolvedAsset.height : 199');
     expect(attributionSource).toContain('TMDB_LOGO_HEIGHT = 24');
     expect(attributionSource).toContain('realWidth / realHeight');
     expect(attributionSource).toContain('resizeMode="contain"');

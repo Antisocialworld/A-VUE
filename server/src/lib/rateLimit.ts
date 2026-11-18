@@ -219,3 +219,13 @@ export async function onDemandRateLimit(request: FastifyRequest, reply: FastifyR
   });
 }
 
+export async function assistantRateLimit(request: FastifyRequest, reply: FastifyReply, userId: string): Promise<boolean> {
+  return checkDualRateLimit(request, reply, {
+    category: 'assistant',
+    userId,
+    userLimit: env.ASSISTANT_RATE_USER_PER_MIN,
+    ipLimit: env.ASSISTANT_RATE_IP_PER_MIN,
+    actionDescription: 'assistant',
+  });
+}
+
