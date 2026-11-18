@@ -4,22 +4,23 @@
  * No clock reads, no randomness, no database access: callers pass the halls,
  * movie IDs, and Lagos calendar days in, and get showtime rows back.
  *
- * Layout (the seed supplies 2 screens and 3 slots per day):
- * - Screens: exactly one per cinema, the lowest-id screen from SEED_HALLS.
+ * Layout (the seed supplies 3 screens and 3 slots per day):
+ * - Movies: the first SEED_MOVIE_COUNT ids in the order the script loaded them.
+ * - Screens: the first SEED_SCREEN_COUNT halls sorted by id ascending.
  * - Slots: 13:00, 16:30, 20:00 Africa/Lagos (+01:00).
- * - Cells per day: screens * slots = 2 * 3 = 6.
- * - Cell index: c = slotIdx * screenCount + screenIdx, which is exactly
- *   c = slotIdx * 2 + screenIdx for the seed's two screens.
- * - Movie: movieIds[(d * cellsPerDay + c) % movieIds.length].
+ * - Cells per day: screens * slots = 3 * 3 = 9.
+ * - Movie: movieIds[(slotIdx + screenIdx + dayIdx) % movieIds.length].
  *
- * Consequences:
- * - The same movie is never placed on two screens at the same start time
- *   (adjacent cell indices are distinct modulo any movie count >= 2).
- * - When movieIds.length <= cellsPerDay (6), every movie gets at least one
- *   slot every day. With the seed's six-movie rotation, each day shows each
- *   movie exactly once. With more than six movies, six daily cells cannot
- *   include every movie daily.
+ * Consequences with exactly 3 movies and 3 screens:
+ * - The same movie is never placed on two screens at the same start time.
+ * - Every movie plays in every slot each day, on 3 different screens per day.
+ * - Each day uses all 3 screens, so both cinemas appear.
+ *
+ * The remaining fourth screen gets no seeded showtimes.
  */
+
+export const SEED_MOVIE_COUNT = 3;
+export const SEED_SCREEN_COUNT = 3;
 
 export interface SeedScheduleHall {
   id: string;
@@ -40,25 +41,22 @@ export interface SeedShowtimeRow {
 }
 
 /**
- * Picks the lowest-id screen per cinema, in deterministic id order.
- * The seed's halls share a common prefix and differ in the final digit, so
- * lexicographic string comparison is the id order.
+ * Picks the first `count` screens sorted by id ascending, in deterministic
+ * order. Ties are broken by cinema id, then price, so the result never depends
+ * on the input order. The seed's halls share a common prefix and differ in the
+ * final digit, so lexicographic string comparison is the id order.
  */
-export function selectLowestIdScreenPerCinema<T extends SeedScheduleHall>(
+export function selectFirstScreensById<T extends SeedScheduleHall>(
   halls: readonly T[],
+  count: number = SEED_SCREEN_COUNT,
 ): T[] {
-  const selected = new Map<string, T>();
+  const sorted = Array.from(halls).sort((a, b) => {
+    if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+    if (a.cinemaId !== b.cinemaId) return a.cinemaId < b.cinemaId ? -1 : 1;
+    return a.priceKobo - b.priceKobo;
+  });
 
-  for (const hall of halls) {
-    const current = selected.get(hall.cinemaId);
-    if (!current || hall.id < current.id) {
-      selected.set(hall.cinemaId, hall);
-    }
-  }
-
-  return Array.from(selected.values()).sort((a, b) =>
-    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-  );
+  return sorted.slice(0, Math.max(0, count));
 }
 
 /**
@@ -74,21 +72,14 @@ export function buildSeedShowtimes(
     return [];
   }
 
-  const slotsPerDay = schedule[0].times.length;
-  const cellsPerDay = screens.length * slotsPerDay;
-  if (cellsPerDay === 0) {
-    return [];
-  }
-
   const rows: SeedShowtimeRow[] = [];
 
-  for (let d = 0; d < schedule.length; d++) {
-    const { dateStr, times } = schedule[d];
+  for (let dayIdx = 0; dayIdx < schedule.length; dayIdx++) {
+    const { dateStr, times } = schedule[dayIdx];
 
     for (let slotIdx = 0; slotIdx < times.length; slotIdx++) {
       for (let screenIdx = 0; screenIdx < screens.length; screenIdx++) {
-        const cellIndex = slotIdx * screens.length + screenIdx;
-        const movieIndex = (d * cellsPerDay + cellIndex) % movieIds.length;
+        const movieIndex = (slotIdx + screenIdx + dayIdx) % movieIds.length;
         const screen = screens[screenIdx];
 
         rows.push({

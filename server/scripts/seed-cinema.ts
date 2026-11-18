@@ -12,8 +12,10 @@
  * - Populates `seats` with both migration 001 and migration 002 column sets.
  * - Requires migration 007: writes screens.price_kobo for every SEED_HALLS entry.
  * - Generates showtimes for the next 8 days at 13:00, 16:30, and 20:00 Africa/Lagos time (+01:00).
- * - Seeds showtimes on one screen per cinema: the lowest-id screen from SEED_HALLS.
- * - Rotates movies deterministically across 6 cells per day (2 screens x 3 slots).
+ * - Seeds the first SEED_MOVIE_COUNT loaded movie ids on the first SEED_SCREEN_COUNT
+ *   screens sorted by id ascending. The remaining screen gets no seeded showtimes.
+ * - Rotates movies deterministically across 9 cells per day (3 screens x 3 slots)
+ *   with movie = movieIds[(slotIdx + screenIdx + dayIdx) % movieIds.length].
  * - Guards showtime inserts on (screen_id, starts_at) only, with no ON CONFLICT,
  *   so the script works both before and after migration 006 adds the unique index.
  * - Leaves `source` unset; migration 006 defaults it to 'seed'.
@@ -23,8 +25,9 @@
 import { writerPool } from '../src/lib/db.js';
 import { getNowPlayingMovies } from '../src/lib/tmdb.js';
 import {
+  SEED_MOVIE_COUNT,
   buildSeedShowtimes,
-  selectLowestIdScreenPerCinema,
+  selectFirstScreensById,
 } from '../src/lib/seedSchedule.js';
 
 interface CinemaData {
@@ -200,8 +203,11 @@ export async function seedCinema(): Promise<void> {
 
   try {
     const { movieIds, source } = await resolveMovieIds();
+    const seededMovieIds = movieIds.slice(0, SEED_MOVIE_COUNT);
     console.log(`[Cinema Seed] Movie IDs source: ${source}`);
-    console.log(`[Cinema Seed] Scheduling showtimes for movies: [${movieIds.join(', ')}]`);
+    console.log(
+      `[Cinema Seed] Scheduling showtimes for the first ${seededMovieIds.length} movie(s): [${seededMovieIds.join(', ')}]`
+    );
 
     await client.query('BEGIN');
 
@@ -259,10 +265,10 @@ export async function seedCinema(): Promise<void> {
     }
 
     // 4. Seed Showtimes (next 8 days at 13:00, 16:30, 20:00 Africa/Lagos time).
-    //    One screen per cinema (lowest id), deterministic 6-cell daily movie rotation.
+    //    First 3 screens by id, deterministic 9-cell daily movie rotation.
     const schedule = getLagosScheduleSlots(8);
-    const showtimeScreens = selectLowestIdScreenPerCinema(SEED_HALLS);
-    const showtimeRows = buildSeedShowtimes(movieIds, showtimeScreens, schedule);
+    const showtimeScreens = selectFirstScreensById(SEED_HALLS);
+    const showtimeRows = buildSeedShowtimes(seededMovieIds, showtimeScreens, schedule);
 
     console.log(
       `[Cinema Seed] Showtime screens: ${showtimeScreens.map((s) => s.name).join(', ')}`

@@ -217,6 +217,10 @@ export const STRINGS = {
     posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
     dateToday: 'Today',
     dateTomorrow: 'Tomorrow',
+    dateChipAccessibilityLabel: (dayLabel: string, dateNum: number, hasShowtimes: boolean) =>
+      hasShowtimes
+        ? `${dayLabel}, ${dateNum}. Showtimes available.`
+        : `${dayLabel}, ${dateNum}. No showtimes.`,
     noShowtimesDayTitle: 'No Showtimes Available',
     noShowtimesDayMessage: 'There are no showtimes scheduled for this date. Please select another date.',
     soldOut: 'Sold out',

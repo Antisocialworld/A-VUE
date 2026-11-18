@@ -2,12 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  SEED_MOVIE_COUNT,
+  SEED_SCREEN_COUNT,
   buildSeedShowtimes,
-  selectLowestIdScreenPerCinema,
+  selectFirstScreensById,
   type SeedScheduleDay,
 } from '../lib/seedSchedule.js';
 
-const MOVIE_IDS = ['550', '933260', '1022789', '533535', '693134', '823464'];
+// The script loads movie ids from the backend (or its fallback list), then keeps
+// only the first SEED_MOVIE_COUNT in load order.
+const LOADED_MOVIE_IDS = ['550', '933260', '1022789', '533535', '693134', '823464'];
+const MOVIE_IDS = LOADED_MOVIE_IDS.slice(0, SEED_MOVIE_COUNT);
 
 // Real ids and prices from SEED_HALLS, deliberately shuffled so the selector
 // cannot accidentally pass by relying on input order.
@@ -44,21 +49,35 @@ const SCHEDULE: SeedScheduleDay[] = Array.from({ length: 8 }, (_, i) => {
   };
 });
 
-const SCREENS = selectLowestIdScreenPerCinema(HALLS);
+const SCREENS = selectFirstScreensById(HALLS);
 const ROWS = buildSeedShowtimes(MOVIE_IDS, SCREENS, SCHEDULE);
 
-describe('Task S: deterministic cinema seed schedule', () => {
-  it('schedules exactly one screen per cinema: the lowest-id screen', () => {
+describe('Task S2: deterministic cinema seed schedule', () => {
+  it('exports the seed counts and selects the first 3 screens sorted by id', () => {
+    expect(SEED_MOVIE_COUNT).toBe(3);
+    expect(SEED_SCREEN_COUNT).toBe(3);
+
     expect(SCREENS.map((s) => s.id)).toEqual([
       'b0000001-0000-4000-8000-000000000001',
+      'b0000001-0000-4000-8000-000000000002',
       'b0000002-0000-4000-8000-000000000001',
     ]);
-    expect(SCREENS.map((s) => s.priceKobo)).toEqual([350000, 300000]);
-    expect(new Set(SCREENS.map((s) => s.cinemaId)).size).toBe(SCREENS.length);
+    expect(SCREENS.map((s) => s.priceKobo)).toEqual([350000, 450000, 300000]);
+
+    // The fourth screen (Ikeja Arena) keeps its seed price but gets no showtimes.
+    const remaining = HALLS.filter((hall) => !SCREENS.some((screen) => screen.id === hall.id));
+    expect(remaining.map((hall) => hall.id)).toEqual([
+      'b0000002-0000-4000-8000-000000000002',
+    ]);
   });
 
-  it('produces 6 cells per day for 8 days (48 rows)', () => {
-    expect(ROWS).toHaveLength(8 * 6);
+  it('selects deterministically regardless of input order', () => {
+    const reversed = selectFirstScreensById([...HALLS].reverse());
+    expect(reversed).toEqual(SCREENS);
+  });
+
+  it('produces 9 cells per day for 8 days (72 rows)', () => {
+    expect(ROWS).toHaveLength(8 * 9);
   });
 
   it('never repeats (screen_id, starts_at)', () => {
@@ -80,35 +99,66 @@ describe('Task S: deterministic cinema seed schedule', () => {
     }
   });
 
-  it('gives every movie at least one slot every day (lists of 6 or fewer)', () => {
-    for (const movieIds of [MOVIE_IDS, MOVIE_IDS.slice(0, 5)]) {
-      const rows = buildSeedShowtimes(movieIds, SCREENS, SCHEDULE);
+  it('gives every movie 3 showings per day on 3 distinct screens, one per slot', () => {
+    for (const day of SCHEDULE) {
+      const dayRows = ROWS.filter((row) => row.startsAt.startsWith(day.dateStr));
+      expect(dayRows).toHaveLength(9);
 
-      for (const day of SCHEDULE) {
-        const dayMovies = new Set(
-          rows.filter((row) => row.startsAt.startsWith(day.dateStr)).map((row) => row.movieId),
+      for (const movieId of MOVIE_IDS) {
+        const movieRows = dayRows.filter((row) => row.movieId === movieId);
+
+        expect(movieRows).toHaveLength(3);
+        expect(new Set(movieRows.map((row) => row.screenId)).size).toBe(3);
+        expect(new Set(movieRows.map((row) => row.startsAt)).size).toBe(3);
+        expect(new Set(movieRows.map((row) => row.startsAt))).toEqual(
+          new Set(day.times.map((time) => `${day.dateStr}T${time}:00+01:00`)),
         );
-        for (const movieId of movieIds) {
-          expect(dayMovies.has(movieId)).toBe(true);
-        }
       }
     }
+  });
+
+  it('uses all 3 screens and both cinemas every day, leaving the fourth screen empty', () => {
+    const screenIds = new Set(SCREENS.map((screen) => screen.id));
+    const cinemaIds = new Set(SCREENS.map((screen) => screen.cinemaId));
+
+    for (const day of SCHEDULE) {
+      const dayRows = ROWS.filter((row) => row.startsAt.startsWith(day.dateStr));
+      expect(new Set(dayRows.map((row) => row.screenId))).toEqual(screenIds);
+      expect(
+        new Set(
+          dayRows.map(
+            (row) => SCREENS.find((screen) => screen.id === row.screenId)!.cinemaId,
+          ),
+        ),
+      ).toEqual(cinemaIds);
+    }
+
+    expect(cinemaIds).toEqual(
+      new Set([
+        'a0000001-0000-4000-8000-000000000001',
+        'a0000001-0000-4000-8000-000000000002',
+      ]),
+    );
+    expect(ROWS.some((row) => row.screenId === 'b0000002-0000-4000-8000-000000000002')).toBe(
+      false,
+    );
   });
 
   it('is identical across runs for identical inputs', () => {
     expect(buildSeedShowtimes(MOVIE_IDS, SCREENS, SCHEDULE)).toEqual(ROWS);
   });
 
-  it('uses movieIds[(d * 6 + slotIdx * 2 + screenIdx) % length]', () => {
-    for (let d = 0; d < SCHEDULE.length; d++) {
-      const day = SCHEDULE[d];
+  it('uses movieIds[(slotIdx + screenIdx + dayIdx) % 3]', () => {
+    expect(MOVIE_IDS).toHaveLength(3);
+
+    for (let dayIdx = 0; dayIdx < SCHEDULE.length; dayIdx++) {
+      const day = SCHEDULE[dayIdx];
 
       for (let slotIdx = 0; slotIdx < day.times.length; slotIdx++) {
         for (let screenIdx = 0; screenIdx < SCREENS.length; screenIdx++) {
-          const cellIndex = slotIdx * 2 + screenIdx;
-          const row = ROWS[d * 6 + cellIndex];
+          const row = ROWS[dayIdx * 9 + slotIdx * 3 + screenIdx];
 
-          expect(row.movieId).toBe(MOVIE_IDS[(d * 6 + cellIndex) % MOVIE_IDS.length]);
+          expect(row.movieId).toBe(MOVIE_IDS[(slotIdx + screenIdx + dayIdx) % 3]);
           expect(row.screenId).toBe(SCREENS[screenIdx].id);
           expect(row.startsAt).toBe(`${day.dateStr}T${day.times[slotIdx]}:00+01:00`);
           expect(row.priceKobo).toBe(SCREENS[screenIdx].priceKobo);
@@ -116,16 +166,28 @@ describe('Task S: deterministic cinema seed schedule', () => {
       }
     }
   });
+
+  it('keeps only the first 3 loaded movie ids in the seed', () => {
+    expect(LOADED_MOVIE_IDS.slice(0, SEED_MOVIE_COUNT)).toEqual(MOVIE_IDS);
+    expect(MOVIE_IDS).toEqual(['550', '933260', '1022789']);
+  });
 });
 
-describe('Task S: seed-cinema.ts wiring', () => {
+describe('Task S2: seed-cinema.ts wiring', () => {
   const scriptPath = path.resolve(__dirname, '../../scripts/seed-cinema.ts');
   const scriptSrc = fs.readFileSync(scriptPath, 'utf-8');
 
-  it('builds rows from SEED_HALLS via the pure schedule module', () => {
+  it('builds rows from the first 3 movies and first 3 screens via the pure module', () => {
     expect(scriptSrc).toContain('getLagosScheduleSlots(8)');
-    expect(scriptSrc).toContain('selectLowestIdScreenPerCinema(SEED_HALLS)');
-    expect(scriptSrc).toContain('buildSeedShowtimes(movieIds, showtimeScreens, schedule)');
+    expect(scriptSrc).toContain('movieIds.slice(0, SEED_MOVIE_COUNT)');
+    expect(scriptSrc).toContain('selectFirstScreensById(SEED_HALLS)');
+    expect(scriptSrc).toContain(
+      'buildSeedShowtimes(seededMovieIds, showtimeScreens, schedule)',
+    );
+  });
+
+  it('no longer uses the old one-screen-per-cinema selector', () => {
+    expect(scriptSrc).not.toContain('selectLowestIdScreenPerCinema');
   });
 
   it('guards inserts on (screen_id, starts_at) only, with no ON CONFLICT or source', () => {
@@ -141,5 +203,15 @@ describe('Task S: seed-cinema.ts wiring', () => {
     expect(insertBlock).not.toContain('movie_id = $1');
     expect(insertBlock).not.toContain('ON CONFLICT');
     expect(insertBlock).not.toContain('source');
+  });
+
+  it('inserts each row at its own screen price', () => {
+    const start = scriptSrc.indexOf('INSERT INTO showtimes');
+    const end = scriptSrc.indexOf('[row.movieId');
+
+    const insertBlock = scriptSrc.slice(start, end);
+    expect(insertBlock).toContain('price_kobo)');
+    expect(insertBlock).toContain('$4');
+    expect(scriptSrc).toContain('[row.movieId, row.screenId, row.startsAt, row.priceKobo]');
   });
 });

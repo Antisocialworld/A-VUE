@@ -74,6 +74,15 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     return initial[0]?.dateStr || '';
   });
 
+  // Set once the user taps a chip. From then on, showtime changes never move
+  // their selection (Task D).
+  const userSelectedDateRef = useRef<boolean>(false);
+
+  const handleSelectDate = useCallback((dateStr: string) => {
+    userSelectedDateRef.current = true;
+    setSelectedDateStr(dateStr);
+  }, []);
+
   const refreshDateOptions = useCallback(() => {
     const newOptions = buildDateOptions();
     setDateOptions(newOptions);
@@ -100,9 +109,11 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     return () => sub.remove();
   }, [refreshDateOptions]);
 
-  // Clear the once-per-visit guard when the screen points at a different movie.
+  // Clear the once-per-visit guard and any tapped date when the screen points
+  // at a different movie.
   useEffect(() => {
     hasEnsuredRef.current = false;
+    userSelectedDateRef.current = false;
   }, [movieId]);
 
   // Invalidate in-flight work if the screen unmounts mid-request.
@@ -170,6 +181,27 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     hasEnsuredRef.current = false;
     loadShowtimes();
   }, [loadShowtimes]);
+
+  // Calendar dates that actually have at least one showtime for this movie.
+  const datesWithShowtimes = useMemo(() => {
+    const keys = new Set<string>();
+    for (const st of showtimes) {
+      keys.add(toLocalDateKey(st.startsAt));
+    }
+    return keys;
+  }, [showtimes]);
+
+  // Select the first day that has showtimes (today when it has any). Runs
+  // again after the ensure flow refetches showtimes. A day the user tapped is
+  // never overridden.
+  useEffect(() => {
+    if (userSelectedDateRef.current) return;
+
+    const firstAvailable = dateOptions.find((opt) => datesWithShowtimes.has(opt.dateStr));
+    if (firstAvailable) {
+      setSelectedDateStr(firstAvailable.dateStr);
+    }
+  }, [dateOptions, datesWithShowtimes]);
 
   // Filter showtimes for the selected date (using local date key via shared helper)
   const filteredShowtimes = useMemo(() => {
@@ -387,17 +419,27 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
         >
           {dateOptions.map((opt) => {
             const isSelected = opt.dateStr === selectedDateStr;
+            const hasShowtimes = datesWithShowtimes.has(opt.dateStr);
+            const isDimmed = !hasShowtimes && !isSelected;
             return (
               <Pressable
                 key={opt.dateStr}
-                onPress={() => setSelectedDateStr(opt.dateStr)}
+                onPress={() => handleSelectDate(opt.dateStr)}
                 accessibilityRole="tab"
-                accessibilityLabel={`${opt.dayLabel}, ${opt.dateNum}`}
+                accessibilityLabel={STRINGS.showtimes.dateChipAccessibilityLabel(
+                  opt.dayLabel,
+                  opt.dateNum,
+                  hasShowtimes,
+                )}
                 accessibilityState={{ selected: isSelected }}
                 style={[
                   styles.datePill,
                   {
-                    backgroundColor: isSelected ? colors.primary : colors.surface_container_low,
+                    backgroundColor: isSelected
+                      ? colors.primary
+                      : isDimmed
+                        ? colors.surface_container_lowest
+                        : colors.surface_container_low,
                     borderColor: isSelected ? colors.primary : colors.outline_variant,
                     borderRadius: radius.md,
                     paddingHorizontal: spacing.md,
@@ -411,7 +453,11 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
                   style={[
                     styles.dateDayText,
                     {
-                      color: isSelected ? colors.on_primary : colors.on_surface_variant,
+                      color: isSelected
+                        ? colors.on_primary
+                        : isDimmed
+                          ? colors.outline
+                          : colors.on_surface_variant,
                       fontFamily: typography.labelSmall.fontFamily,
                       fontSize: typography.labelSmall.fontSize,
                     },
@@ -424,7 +470,11 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
                   style={[
                     styles.dateNumText,
                     {
-                      color: isSelected ? colors.on_primary : colors.on_surface,
+                      color: isSelected
+                        ? colors.on_primary
+                        : isDimmed
+                          ? colors.outline
+                          : colors.on_surface,
                       fontFamily: typography.titleMedium.fontFamily,
                       fontSize: typography.titleMedium.fontSize,
                       fontWeight: '700',
