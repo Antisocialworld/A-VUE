@@ -2,11 +2,41 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_SCREENS,
   getLagosHorizonDays,
+  isMovieEligibleForHorizon,
   lagosSlotToUtcMs,
   planOnDemandShowtimes,
+  showtimeBlocksOverlap,
+  type ScreenDefinition,
 } from '../lib/onDemandShowtimes.js';
+
+// Planner inputs are always supplied by the caller now (loaded from the DB in production).
+const TEST_SCREENS: ScreenDefinition[] = [
+  {
+    id: 'b0000001-0000-4000-8000-000000000001',
+    cinemaId: 'a0000001-0000-4000-8000-000000000001',
+    name: 'Screen 1 (Grand)',
+    priceKobo: 350000,
+  },
+  {
+    id: 'b0000001-0000-4000-8000-000000000002',
+    cinemaId: 'a0000001-0000-4000-8000-000000000001',
+    name: 'Screen 2 (VIP)',
+    priceKobo: 450000,
+  },
+  {
+    id: 'b0000002-0000-4000-8000-000000000001',
+    cinemaId: 'a0000001-0000-4000-8000-000000000002',
+    name: 'Screen 1 (Main)',
+    priceKobo: 300000,
+  },
+  {
+    id: 'b0000002-0000-4000-8000-000000000002',
+    cinemaId: 'a0000001-0000-4000-8000-000000000002',
+    name: 'Screen 2 (Arena)',
+    priceKobo: 400000,
+  },
+];
 
 describe('Task 2: Pure On-Demand Showtime Planner', () => {
   // Fixed test reference time: Wednesday, 2026-11-18 at 09:00:00 UTC (10:00:00 Lagos time)
@@ -17,6 +47,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '933260',
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
     };
 
     const run1 = planOnDemandShowtimes(params);
@@ -31,6 +62,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '550',
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
       slotsPerMoviePerDay: 2,
     });
@@ -57,6 +89,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '550',
       now: lateNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 1,
       minLeadMinutes: 60,
     });
@@ -78,6 +111,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       releaseDate: futureRelease,
       now: fixedNow, // 2026-11-18
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
     });
 
@@ -97,6 +131,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       releaseDate: farFutureRelease,
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
     });
 
@@ -127,6 +162,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '123',
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
       slotsPerMoviePerDay: 4,
     });
@@ -145,7 +181,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
   });
 
   it('skips occupied slots where an existing showtime on that screen starts within 3 hours', () => {
-    const screen1 = DEFAULT_SCREENS[0].id;
+    const screen1 = TEST_SCREENS[0].id;
     // Occupy Screen 1 at 13:00 on 2026-11-18
     const existing = [
       {
@@ -158,6 +194,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '100',
       now: fixedNow,
       existingShowtimes: existing,
+      screens: TEST_SCREENS,
       horizonDays: 1,
       slotsPerMoviePerDay: 2,
     });
@@ -179,6 +216,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '550',
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
       slotsPerMoviePerDay: 2,
       maxShowtimesPerMovie: 5, // strict cap of 5
@@ -192,6 +230,7 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
       movieId: '550',
       now: fixedNow,
       existingShowtimes: [],
+      screens: TEST_SCREENS,
       horizonDays: 7,
       slotsPerMoviePerDay: 2,
       maxShowtimesPerMovie: 30,
@@ -199,6 +238,136 @@ describe('Task 2: Pure On-Demand Showtime Planner', () => {
     });
 
     expect(planned.length).toBe(2);
+  });
+
+  it('requires caller-supplied screens and holds no hardcoded screen IDs or prices', () => {
+    const filePath = path.resolve(__dirname, '../lib/onDemandShowtimes.ts');
+    const source = fs.readFileSync(filePath, 'utf-8');
+
+    expect(source).not.toContain('DEFAULT_SCREENS');
+    expect(source).not.toContain('b0000001-0000-4000-8000-000000000001');
+    expect(source).not.toContain('b0000002-0000-4000-8000-000000000001');
+    expect(source).not.toContain('priceKobo: 350000');
+    expect(source).not.toContain('priceKobo: 450000');
+
+    const planned = planOnDemandShowtimes({
+      movieId: '550',
+      now: fixedNow,
+      existingShowtimes: [],
+      screens: [],
+      horizonDays: 7,
+    });
+
+    expect(planned).toEqual([]);
+  });
+
+  it('does not emit hallId: the table is screens', () => {
+    const planned = planOnDemandShowtimes({
+      movieId: '550',
+      now: fixedNow,
+      existingShowtimes: [],
+      screens: TEST_SCREENS,
+      horizonDays: 1,
+      slotsPerMoviePerDay: 2,
+    });
+
+    expect(planned.length).toBeGreaterThan(0);
+    for (const st of planned) {
+      expect(Object.prototype.hasOwnProperty.call(st, 'hallId')).toBe(false);
+    }
+
+    const filePath = path.resolve(__dirname, '../lib/onDemandShowtimes.ts');
+    const source = fs.readFileSync(filePath, 'utf-8');
+    expect(source).not.toContain('hallId');
+  });
+
+  it('treats cancelled showtimes as occupied because they still hold the unique slot', () => {
+    const screen1 = TEST_SCREENS[0].id;
+    const planned = planOnDemandShowtimes({
+      movieId: '100', // starts on screen 1 for dayIndex 0
+      now: fixedNow,
+      existingShowtimes: [
+        {
+          screenId: screen1,
+          startsAt: '2026-11-18T13:00:00+01:00',
+          cancelled: true,
+        },
+      ],
+      screens: TEST_SCREENS,
+      horizonDays: 1,
+      slotsPerMoviePerDay: 3,
+    });
+
+    const screen1At13 = planned.find(
+      (st) => st.screenId === screen1 && st.startsAt === '2026-11-18T13:00:00+01:00',
+    );
+    expect(screen1At13).toBeUndefined();
+  });
+
+  it('treats a 3-hour showtime as an interval: 13:00 blocks 10:30 and 13:45, but not 17:00', () => {
+    const existingMs = new Date('2026-11-18T13:00:00+01:00').getTime();
+
+    expect(showtimeBlocksOverlap(existingMs, new Date('2026-11-18T10:30:00+01:00').getTime())).toBe(true);
+    expect(showtimeBlocksOverlap(existingMs, new Date('2026-11-18T13:45:00+01:00').getTime())).toBe(true);
+    expect(showtimeBlocksOverlap(existingMs, new Date('2026-11-18T17:00:00+01:00').getTime())).toBe(false);
+
+    // Symmetric: an earlier block also blocks a later candidate.
+    expect(showtimeBlocksOverlap(new Date('2026-11-18T10:30:00+01:00').getTime(), existingMs)).toBe(true);
+
+    // Touching blocks do not overlap (one ends exactly as the next begins).
+    expect(showtimeBlocksOverlap(existingMs, new Date('2026-11-18T16:00:00+01:00').getTime())).toBe(false);
+  });
+
+  it('planner blocks overlapping weekend slots from an existing 13:00 showtime', () => {
+    const screen = TEST_SCREENS[0];
+    const saturday = '2026-11-21';
+
+    const planned = planOnDemandShowtimes({
+      movieId: '100',
+      now: fixedNow,
+      existingShowtimes: [{ screenId: screen.id, startsAt: `${saturday}T13:00:00+01:00` }],
+      screens: [screen],
+      horizonDays: 4,
+      slotsPerMoviePerDay: 4,
+    });
+
+    const saturdayTimes = planned
+      .filter((st) => st.startsAt.startsWith(saturday))
+      .map((st) => st.startsAt.slice(11, 16));
+
+    expect(saturdayTimes).not.toContain('10:30');
+    expect(saturdayTimes).not.toContain('13:45');
+    expect(saturdayTimes).toContain('17:00');
+  });
+
+  it('a cancelled showtime blocks the same overlapping interval', () => {
+    const screen = TEST_SCREENS[0];
+    const saturday = '2026-11-21';
+
+    const planned = planOnDemandShowtimes({
+      movieId: '100',
+      now: fixedNow,
+      existingShowtimes: [
+        { screenId: screen.id, startsAt: `${saturday}T13:00:00+01:00`, cancelled: true },
+      ],
+      screens: [screen],
+      horizonDays: 4,
+      slotsPerMoviePerDay: 4,
+    });
+
+    const saturdayTimes = planned
+      .filter((st) => st.startsAt.startsWith(saturday))
+      .map((st) => st.startsAt.slice(11, 16));
+
+    expect(saturdayTimes).not.toContain('10:30');
+    expect(saturdayTimes).not.toContain('13:45');
+    expect(saturdayTimes).toContain('17:00');
+  });
+
+  it('eligibility helper rejects a release date after the horizon end', () => {
+    expect(isMovieEligibleForHorizon('2026-11-24', fixedNow, 7)).toBe(true);
+    expect(isMovieEligibleForHorizon('2026-11-25', fixedNow, 7)).toBe(false);
+    expect(isMovieEligibleForHorizon('', fixedNow, 7)).toBe(true);
   });
 
   it('source scan proves NO Math.random and NO createHash in onDemandShowtimes.ts', () => {

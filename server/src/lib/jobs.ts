@@ -514,3 +514,44 @@ export async function cancelShowtimeAndRefund(showtimeId: string): Promise<{
   }
 }
 
+/**
+ * Deletes stale, unbooked on-demand showtimes in one bounded statement.
+ *
+ * Safety rules:
+ * - Only `source = 'on_demand'` rows can be deleted; seeded showtimes are never touched.
+ * - Any showtime that appears in `bookings` is kept, so ticket/payment/refund history survives.
+ * - Only showtimes that began more than 24 hours ago are considered stale.
+ * - `LIMIT $1` + `SKIP LOCKED` keeps each cron run short and concurrency-safe.
+ * - One DELETE statement, so a partial batch can never be half-applied.
+ */
+export async function purgeStaleOnDemandShowtimes(batchSize = 100): Promise<number> {
+  if (!Number.isInteger(batchSize) || batchSize <= 0) {
+    throw new Error('INVALID_BATCH_SIZE');
+  }
+
+  const pool = writerPool;
+  const result = await pool.query(
+    `WITH stale AS (
+       SELECT s.id
+       FROM showtimes s
+       WHERE s.source = 'on_demand'
+         AND s.starts_at < NOW() - INTERVAL '24 hours'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM bookings b
+           WHERE b.showtime_id = s.id
+         )
+       ORDER BY s.starts_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     DELETE FROM showtimes s
+     USING stale
+     WHERE s.id = stale.id
+     RETURNING s.id`,
+    [batchSize],
+  );
+
+  return result.rowCount ?? result.rows.length;
+}
+

@@ -1,12 +1,18 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { isAdmin } from '../env.js';
+import { env, isAdmin } from '../env.js';
 import { writerPool } from '../lib/db.js';
 import { getSeatMap, holdSeats, releaseSeats } from '../lib/holds.js';
 import { cancelShowtimeAndRefund } from '../lib/jobs.js';
-import { holdRateLimit, searchRateLimit } from '../lib/rateLimit.js';
+import { createPgOnDemandStore, ensureOnDemandShowtimes } from '../lib/onDemandEnsure.js';
+import { holdRateLimit, onDemandRateLimit, searchRateLimit } from '../lib/rateLimit.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
+import { getMovieDetails } from '../lib/tmdb.js';
 import { checkInWaitingRoom, getWaitingRoomStatus } from '../lib/waitingRoom.js';
-import { holdSeatsBodySchema, releaseHoldsBodySchema } from '../schemas/cinema.js';
+import {
+  ensureMovieShowtimesParamsSchema,
+  holdSeatsBodySchema,
+  releaseHoldsBodySchema,
+} from '../schemas/cinema.js';
 
 export async function showtimeRoutes(fastify: FastifyInstance) {
   /**
@@ -47,6 +53,118 @@ export async function showtimeRoutes(fastify: FastifyInstance) {
       movieId,
       showtimes,
     });
+  });
+
+  /**
+   * POST /movies/:id/showtimes/ensure
+   * Idempotently makes sure the movie has on-demand showtimes for the Lagos horizon.
+   *
+   * - Auth required; dual rate limit (user AND IP).
+   * - Per-movie advisory lock + one transaction; concurrent calls serialise.
+   * - Screens and prices are loaded from the DB; no hardcoded halls or prices.
+   * - Occupied slots include cancelled showtimes (they still own (screen_id, starts_at)).
+   * - Always 200 with { created, reason? }: "nothing to add" is a normal outcome.
+   *
+   * Logs movie id, counts and reason only. Never the requesting user.
+   */
+  fastify.post('/movies/:id/showtimes/ensure', async (request: FastifyRequest, reply: FastifyReply) => {
+    let user;
+    try {
+      user = await getSessionUser(request);
+    } catch (err: any) {
+      if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required.',
+            requestId: request.id,
+          },
+        });
+      }
+      throw err;
+    }
+
+    const allowed = await onDemandRateLimit(request, reply, user.id);
+    if (!allowed) return;
+
+    const parsedParams = ensureMovieShowtimesParamsSchema.safeParse(request.params);
+    if (!parsedParams.success) {
+      return reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid movie id.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    const movieId = parsedParams.data.id;
+
+    // Eligibility needs the release date. TMDB is the only source for it.
+    let releaseDate: string | null = null;
+    try {
+      const details = await getMovieDetails(movieId);
+      if (!details) {
+        return reply.status(200).send({ created: 0, reason: 'NOT_ELIGIBLE' });
+      }
+      releaseDate = details.movie.releaseDate;
+    } catch {
+      return reply.status(200).send({ created: 0, reason: 'TMDB_UNAVAILABLE' });
+    }
+
+    const client = await writerPool.connect().catch(() => null);
+    if (!client) {
+      return reply.status(503).send({
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Unable to prepare showtimes. Please retry.',
+          requestId: request.id,
+        },
+      });
+    }
+
+    try {
+      const result = await ensureOnDemandShowtimes({
+        movieId,
+        releaseDate,
+        now: new Date(),
+        caps: {
+          horizonDays: env.ON_DEMAND_DAYS,
+          minLeadMinutes: env.ON_DEMAND_MIN_LEAD_MINUTES,
+          slotsPerMoviePerDay: env.ON_DEMAND_SLOTS_PER_MOVIE_PER_DAY,
+          maxShowtimesPerMovie: env.ON_DEMAND_MAX_SHOWTIMES_PER_MOVIE,
+          maxNewMoviesPerDay: env.ON_DEMAND_MAX_NEW_MOVIES_PER_DAY,
+          maxActiveShowtimes: env.ON_DEMAND_MAX_ACTIVE_SHOWTIMES,
+        },
+        store: createPgOnDemandStore(client),
+      });
+
+      // Privacy: movie id, counts and reason only. No user id, no search text.
+      request.log.info(
+        { movieId, created: result.created, reason: result.reason ?? null },
+        'on_demand_showtimes_ensure',
+      );
+
+      return reply.status(200).send(
+        result.reason
+          ? { created: result.created, reason: result.reason }
+          : { created: result.created },
+      );
+    } catch (err: any) {
+      request.log.error(
+        { movieId, err: err?.message ?? 'unknown' },
+        'on_demand_showtimes_ensure_failed',
+      );
+      return reply.status(503).send({
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Unable to prepare showtimes. Please retry.',
+          requestId: request.id,
+        },
+      });
+    } finally {
+      client.release();
+    }
   });
 
   /**

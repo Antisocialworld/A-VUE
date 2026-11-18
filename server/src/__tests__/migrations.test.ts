@@ -129,4 +129,43 @@ describe('Database Migrations & Ledger Schema Audit (Rule 03)', () => {
       expect(sql).toContain('HAVING COUNT(*) > 1');
     });
   });
+
+  describe('Migration 007: Screen Prices (Task P)', () => {
+    const migration007Path = path.join(migrationsDir, '007_screens_price.sql');
+
+    it('migration 007 file exists, is forward-only, and contains no DROP or DELETE', () => {
+      expect(fs.existsSync(migration007Path)).toBe(true);
+      const sql = fs.readFileSync(migration007Path, 'utf-8');
+      expect(sql).toContain("INSERT INTO migrations_ledger (filename)");
+      expect(sql).toContain("'007_screens_price.sql'");
+      expect(sql).toContain('ON CONFLICT (filename) DO NOTHING');
+      expect(sql).not.toMatch(/\bDROP\b/i);
+      expect(sql).not.toMatch(/\bDELETE\b/i);
+    });
+
+    it('adds price_kobo with the same BIGINT type as showtimes.price_kobo, only if missing', () => {
+      const sql = fs.readFileSync(migration007Path, 'utf-8');
+      expect(sql).toContain('ALTER TABLE screens ADD COLUMN IF NOT EXISTS price_kobo BIGINT');
+      expect(sql).not.toContain('ADD COLUMN IF NOT EXISTS price_kobo BIGINT NOT NULL');
+    });
+
+    it('adds a guarded CHECK for positive kobo or NULL', () => {
+      const sql = fs.readFileSync(migration007Path, 'utf-8');
+      expect(sql).toContain('IF NOT EXISTS (');
+      expect(sql).toContain("SELECT 1 FROM pg_constraint WHERE conname = 'screens_price_kobo_check'");
+      expect(sql).toContain('ADD CONSTRAINT screens_price_kobo_check');
+      expect(sql).toContain('CHECK (price_kobo IS NULL OR price_kobo > 0)');
+    });
+
+    it('backfills NULL prices from the latest showtime per screen', () => {
+      const sql = fs.readFileSync(migration007Path, 'utf-8');
+      expect(sql).toContain('UPDATE screens s');
+      expect(sql).toContain('SET price_kobo = (');
+      expect(sql).toContain('SELECT st.price_kobo');
+      expect(sql).toContain('WHERE st.screen_id = s.id');
+      expect(sql).toContain('ORDER BY st.starts_at DESC');
+      expect(sql).toContain('LIMIT 1');
+      expect(sql).toContain('WHERE s.price_kobo IS NULL');
+    });
+  });
 });

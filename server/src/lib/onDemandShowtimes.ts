@@ -5,13 +5,16 @@
  * - Horizon: Africa/Lagos calendar days (UTC+1, no DST).
  * - Mon-Fri: 13:00, 16:30, 20:00 (+01:00).
  * - Sat-Sun: 10:30, 13:45, 17:00, 20:15 (+01:00).
- * - 3-hour non-overlapping blocks per screen (no showtime within 180 min).
+ * - 3-hour blocks per screen. A candidate is blocked when its block overlaps
+ *   the block of any existing showtime on that screen (interval overlap, not
+ *   exact-start equality). Cancelled rows still block.
  * - Lead time: skip slots starting less than minLeadMinutes from now.
  * - Eligible: movie release date must not be after horizon end.
  * - Never schedule slots before movie release date.
  * - Distribute deterministically starting at (movieId + dayIndex) mod screenCount.
  * - Caps: capped by maxShowtimesPerMovie and slotsPerMoviePerDay.
- * - Integer kobo pricing matching seed per screen.
+ * - Screens and integer kobo prices are supplied by the caller (loaded from the DB).
+ *   This module deliberately holds no screen IDs or prices.
  */
 
 export interface ScreenDefinition {
@@ -21,42 +24,16 @@ export interface ScreenDefinition {
   priceKobo: number;
 }
 
-export const DEFAULT_SCREENS: ScreenDefinition[] = [
-  {
-    id: 'b0000001-0000-4000-8000-000000000001',
-    cinemaId: 'a0000001-0000-4000-8000-000000000001',
-    name: 'Screen 1 (Grand)',
-    priceKobo: 350000,
-  },
-  {
-    id: 'b0000001-0000-4000-8000-000000000002',
-    cinemaId: 'a0000001-0000-4000-8000-000000000001',
-    name: 'Screen 2 (VIP)',
-    priceKobo: 450000,
-  },
-  {
-    id: 'b0000002-0000-4000-8000-000000000001',
-    cinemaId: 'a0000001-0000-4000-8000-000000000002',
-    name: 'Screen 1 (Main)',
-    priceKobo: 300000,
-  },
-  {
-    id: 'b0000002-0000-4000-8000-000000000002',
-    cinemaId: 'a0000001-0000-4000-8000-000000000002',
-    name: 'Screen 2 (Arena)',
-    priceKobo: 400000,
-  },
-];
-
 export interface ExistingShowtimeItem {
   screenId: string;
   startsAt: string | Date;
+  /** Cancelled showtimes are still passed in: they keep the (screen_id, starts_at) slot. */
+  cancelled?: boolean;
 }
 
 export interface PlannedShowtime {
   movieId: string;
   screenId: string;
-  hallId: string;
   startsAt: string;
   priceKobo: number;
   source: 'on_demand';
@@ -72,7 +49,7 @@ export interface PlanOnDemandParams {
   slotsPerMoviePerDay?: number; // default 2
   maxShowtimesPerMovie?: number; // default 30
   existingMovieShowtimesCount?: number; // default 0
-  screens?: ScreenDefinition[];
+  screens: ScreenDefinition[]; // required: route loads these from the DB
 }
 
 export interface LagosCalendarDay {
@@ -84,7 +61,28 @@ export interface LagosCalendarDay {
 }
 
 const LAGOS_OFFSET_MS = 60 * 60 * 1000; // UTC+1, no DST
-const THREE_HOURS_MS = 3 * 60 * 60 * 1000; // 180 min non-overlap block
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000; // 180 min block per showtime
+
+/**
+ * Interval overlap for two 3-hour showtime blocks.
+ *
+ * A slot is blocked when [existingStart, existingEnd) intersects
+ * [candidateStart, candidateEnd): existingStart < candidateEnd AND
+ * candidateStart < existingEnd. Touching blocks (exactly 3 hours apart) do not
+ * overlap, so a 13:00 show blocks 10:30 and 13:45 but not 16:00 or 17:00.
+ *
+ * Cancelled showtimes run through the same check: they still hold their
+ * (screen_id, starts_at) slot and its 3-hour footprint.
+ */
+export function showtimeBlocksOverlap(
+  existingStartsAtMs: number,
+  candidateStartsAtMs: number,
+  blockMs: number = THREE_HOURS_MS,
+): boolean {
+  const existingEndMs = existingStartsAtMs + blockMs;
+  const candidateEndMs = candidateStartsAtMs + blockMs;
+  return existingStartsAtMs < candidateEndMs && candidateStartsAtMs < existingEndMs;
+}
 
 /**
  * Calculates calendar days in Africa/Lagos timezone (+01:00).
@@ -113,6 +111,25 @@ export function getLagosHorizonDays(now: Date, horizonDays: number): LagosCalend
     });
   }
   return days;
+}
+
+/**
+ * Eligibility rule: a movie releasing after the last Lagos horizon day is not eligible.
+ * An empty release date is treated as eligible (unknown release date).
+ */
+export function isMovieEligibleForHorizon(
+  releaseDate: string | null | undefined,
+  now: Date,
+  horizonDays: number,
+): boolean {
+  if (!releaseDate || releaseDate.trim().length === 0) {
+    return true;
+  }
+  const horizon = getLagosHorizonDays(now, horizonDays);
+  if (horizon.length === 0) {
+    return false;
+  }
+  return releaseDate.trim() <= horizon[horizon.length - 1].dateStr;
 }
 
 /**
@@ -145,7 +162,7 @@ export function planOnDemandShowtimes(params: PlanOnDemandParams): PlannedShowti
     slotsPerMoviePerDay = 2,
     maxShowtimesPerMovie = 30,
     existingMovieShowtimesCount = 0,
-    screens = DEFAULT_SCREENS,
+    screens,
   } = params;
 
   if (screens.length === 0 || horizonDays <= 0 || slotsPerMoviePerDay <= 0) {
@@ -172,7 +189,9 @@ export function planOnDemandShowtimes(params: PlanOnDemandParams): PlannedShowti
     }
   }
 
-  // Index existing showtimes by screenId for fast O(1) overlap checks
+  // Index existing showtimes by screenId for fast interval-overlap checks.
+  // Cancelled showtimes stay in the occupied set on purpose: they still hold the
+  // (screen_id, starts_at) unique slot in the database and its 3-hour block.
   const occupiedByScreen = new Map<string, number[]>();
   for (const screen of screens) {
     occupiedByScreen.set(screen.id, []);
@@ -190,7 +209,7 @@ export function planOnDemandShowtimes(params: PlanOnDemandParams): PlannedShowti
     const occupied = occupiedByScreen.get(screenId);
     if (!occupied) return false;
     for (const occ of occupied) {
-      if (Math.abs(occ - candidateMs) < THREE_HOURS_MS) {
+      if (showtimeBlocksOverlap(occ, candidateMs)) {
         return true;
       }
     }
@@ -263,7 +282,6 @@ export function planOnDemandShowtimes(params: PlanOnDemandParams): PlannedShowti
         planned.push({
           movieId: String(movieId),
           screenId: screen.id,
-          hallId: screen.id,
           startsAt: `${day.dateStr}T${timeStr}:00+01:00`,
           priceKobo: screen.priceKobo,
           source: 'on_demand',
@@ -300,7 +318,6 @@ export function planOnDemandShowtimes(params: PlanOnDemandParams): PlannedShowti
           planned.push({
             movieId: String(movieId),
             screenId: screen.id,
-            hallId: screen.id,
             startsAt: `${day.dateStr}T${timeStr}:00+01:00`,
             priceKobo: screen.priceKobo,
             source: 'on_demand',

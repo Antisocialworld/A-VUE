@@ -225,6 +225,11 @@ export const STRINGS = {
     selectSeatsAction: 'Select seats',
     footerPhotoAccessibilityLabel: 'Cinema auditorium showing screen and seating',
     cinemaCardPhotoAccessibilityLabel: 'Cinema marquee decorative photo',
+    preparingShowtimes: 'Finding showtimes…',
+    noShowtimesTitle: 'No Showtimes Yet',
+    noShowtimesMessage: 'There are no showtimes for this movie right now. Please check back soon.',
+    rateLimitToast: 'Showtime requests are busy. Wait a moment, then try again.',
+    ensureFailedToast: 'We could not prepare showtimes. Please try again.',
   },
 
   seatMap: {

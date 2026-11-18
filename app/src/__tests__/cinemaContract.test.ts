@@ -5,6 +5,7 @@ import { STRINGS, formatDeletableDate } from '../constants/strings';
 import {
   MAX_SEATS_PER_BOOKING,
   checkoutBodySchema,
+  ensureMovieShowtimesResponseSchema,
   holdSeatsBodySchema,
   seatMapItemSchema,
   showtimeItemSchema,
@@ -27,6 +28,15 @@ describe('A VUE Cinema Contracts, Money & Booking Rules (Task 8)', () => {
     contract.cases.showtimeItem.forEach((tc: any) => {
       it(tc.description, () => {
         const res = showtimeItemSchema.safeParse(tc.input);
+        expect(res.success).toBe(tc.expectedValid);
+      });
+    });
+  });
+
+  describe('ensureMovieShowtimesResponseSchema contract fixtures', () => {
+    contract.cases.ensureMovieShowtimesResponse.forEach((tc: any) => {
+      it(tc.description, () => {
+        const res = ensureMovieShowtimesResponseSchema.safeParse(tc.input);
         expect(res.success).toBe(tc.expectedValid);
       });
     });

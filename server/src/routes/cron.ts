@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from '../env.js';
-import { processPendingWebhookEvents } from '../lib/jobs.js';
+import { processPendingWebhookEvents, purgeStaleOnDemandShowtimes } from '../lib/jobs.js';
 import { query } from '../lib/db.js';
 
 function verifyCronAuth(authHeader: string | undefined): boolean {
@@ -45,6 +45,7 @@ export async function cronRoutes(fastify: FastifyInstance) {
    * POST /cron/purge-users
    * Secured endpoint triggered by cron sweep.
    * Anonymises users whose deletion grace period has expired (purge_after < NOW()).
+   * Also deletes a bounded batch of stale, unbooked on-demand showtimes.
    * Guarded by CRON_SECRET with constant-time comparison (crypto.timingSafeEqual).
    * Retains ticket, booking, payment, and ledger history for financial/audit integrity.
    * (Task 4)
@@ -79,14 +80,18 @@ export async function cronRoutes(fastify: FastifyInstance) {
         purgedCount++;
       }
 
+      // Same cron sweep: bounded, single-statement cleanup of stale on-demand showtimes.
+      const showtimesPurged = await purgeStaleOnDemandShowtimes(100);
+
       return reply.status(200).send({
         success: true,
         purgedCount,
+        showtimesPurged,
         timestamp: new Date().toISOString(),
       });
     } catch (err: any) {
-      process.stderr.write(`[Cron Error] User purge run failed: ${err.message}\n`);
-      return reply.status(500).send({ error: 'User purge execution failed' });
+      process.stderr.write(`[Cron Error] Purge run failed: ${err.message}\n`);
+      return reply.status(500).send({ error: 'Purge execution failed' });
     }
   });
 }

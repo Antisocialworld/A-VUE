@@ -56,6 +56,19 @@ describe('A VUE Cinema & Showtimes Seed Script Audit (Rule 03 & 04)', () => {
     expect(scriptSrc).toContain('INSERT INTO halls');
   });
 
+  it('asserts the seed sets screens.price_kobo for every hall in SEED_HALLS', () => {
+    const loopStart = scriptSrc.indexOf('for (const hall of SEED_HALLS)');
+    const seatsSectionStart = scriptSrc.indexOf('// 3. Seed Seats');
+
+    expect(loopStart).toBeGreaterThan(-1);
+    expect(seatsSectionStart).toBeGreaterThan(loopStart);
+
+    const screensSection = scriptSrc.slice(loopStart, seatsSectionStart);
+    expect(screensSection).toContain('UPDATE screens');
+    expect(screensSection).toContain('SET price_kobo = $2');
+    expect(screensSection).toContain('[hall.id, hall.priceKobo]');
+  });
+
   it('asserts seed script populates seats with both migration 001 and 002 column sets', () => {
     expect(scriptSrc).toContain('INSERT INTO seats');
     expect(scriptSrc).toContain('screen_id, hall_id, row_label, "row", seat_number, "number", seat_type, accessible');

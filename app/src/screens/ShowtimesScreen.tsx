@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   AppStateStatus,
@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import Svg, { Defs, G, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
-import { Button, EmptyState, ScreenShell, Skeleton } from '../components';
+import { Button, EmptyState, ScreenShell, Skeleton, Toast } from '../components';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { ShowtimeItem } from '../schemas/cinema';
@@ -55,6 +55,13 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
   const [showtimes, setShowtimes] = useState<ShowtimeItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<unknown | null>(null);
+  const [ensuring, setEnsuring] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Ask the backend for showtimes at most once per visit, and make sure a stale
+  // response (movie change or retry) can never overwrite the current view.
+  const hasEnsuredRef = useRef<boolean>(false);
+  const activeRequestIdRef = useRef<number>(0);
 
   const hasPoster = Boolean(posterUrl && !imageError);
   const hasMeta = Boolean(releaseYear || typeof voteAverage === 'number');
@@ -93,23 +100,76 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
     return () => sub.remove();
   }, [refreshDateOptions]);
 
-  const fetchShowtimes = useCallback(async () => {
+  // Clear the once-per-visit guard when the screen points at a different movie.
+  useEffect(() => {
+    hasEnsuredRef.current = false;
+  }, [movieId]);
+
+  // Invalidate in-flight work if the screen unmounts mid-request.
+  useEffect(() => {
+    return () => {
+      activeRequestIdRef.current += 1;
+    };
+  }, []);
+
+  const loadShowtimes = useCallback(async () => {
+    const requestId = ++activeRequestIdRef.current;
     setLoading(true);
     setError(null);
+    setEnsuring(false);
+    setToastMessage(null);
 
     try {
-      const data = await cinemaClient.getMovieShowtimes(movieId);
+      let data = await cinemaClient.getMovieShowtimes(movieId);
+      if (activeRequestIdRef.current !== requestId) return;
+
+      // The backend prepares on-demand showtimes only when asked. Ask at most
+      // once per visit, and only when this movie genuinely has none.
+      if (data.showtimes.length === 0 && !hasEnsuredRef.current) {
+        hasEnsuredRef.current = true;
+        setEnsuring(true);
+
+        try {
+          await cinemaClient.ensureMovieShowtimes(movieId);
+          if (activeRequestIdRef.current !== requestId) return;
+
+          data = await cinemaClient.getMovieShowtimes(movieId);
+          if (activeRequestIdRef.current !== requestId) return;
+        } catch (ensureError: any) {
+          if (activeRequestIdRef.current !== requestId) return;
+          // Expected under load: calm, non-blocking toast. The empty state stays.
+          setToastMessage(
+            ensureError?.status === 429
+              ? STRINGS.showtimes.rateLimitToast
+              : STRINGS.showtimes.ensureFailedToast
+          );
+        } finally {
+          if (activeRequestIdRef.current === requestId) {
+            setEnsuring(false);
+          }
+        }
+      }
+
       setShowtimes(data.showtimes);
     } catch (err: any) {
+      if (activeRequestIdRef.current !== requestId) return;
       setError(err);
     } finally {
-      setLoading(false);
+      if (activeRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [movieId]);
 
   useEffect(() => {
-    fetchShowtimes();
-  }, [fetchShowtimes]);
+    loadShowtimes();
+  }, [loadShowtimes]);
+
+  const handleRetry = useCallback(() => {
+    // A user-initiated retry is a fresh attempt, but still only one per tap.
+    hasEnsuredRef.current = false;
+    loadShowtimes();
+  }, [loadShowtimes]);
 
   // Filter showtimes for the selected date (using local date key via shared helper)
   const filteredShowtimes = useMemo(() => {
@@ -164,6 +224,8 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
       scrollable={false}
       contentContainerStyle={[styles.container, { padding: 0 }]}
     >
+      <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
+
       {/* Movie Header Container */}
       <View
         style={[
@@ -379,6 +441,24 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
 
       {/* Main Content Area */}
       {loading ? (
+        ensuring ? (
+          <View style={[styles.centeredState, { padding: spacing.xl }]}>
+            <Text
+              allowFontScaling
+              style={[
+                styles.preparingText,
+                {
+                  color: colors.on_surface_variant,
+                  fontFamily: typography.bodyMedium.fontFamily,
+                  fontSize: typography.bodyMedium.fontSize,
+                  lineHeight: typography.bodyMedium.lineHeight,
+                },
+              ]}
+            >
+              {STRINGS.showtimes.preparingShowtimes}
+            </Text>
+          </View>
+        ) : (
         <View style={[styles.skeletonContainer, { padding: spacing.base }]}>
           <Skeleton height={28} width="50%" borderRadius={radius.sm} style={{ marginBottom: spacing.md }} />
           <View style={{ flexDirection: 'row', gap: spacing.md, marginBottom: spacing.xl }}>
@@ -392,6 +472,7 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
             <Skeleton height={70} width={90} borderRadius={radius.md} />
           </View>
         </View>
+        )
       ) : error ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
           {(() => {
@@ -401,10 +482,19 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
                 title={errorCopy.title}
                 message={errorCopy.body}
                 actionTitle={STRINGS.errors.tryAgain}
-                onActionPress={fetchShowtimes}
+                onActionPress={handleRetry}
               />
             );
           })()}
+        </View>
+      ) : showtimes.length === 0 ? (
+        <View style={[styles.centeredState, { padding: spacing.xl }]}>
+          <EmptyState
+            title={STRINGS.showtimes.noShowtimesTitle}
+            message={STRINGS.showtimes.noShowtimesMessage}
+            actionTitle={STRINGS.errors.tryAgain}
+            onActionPress={handleRetry}
+          />
         </View>
       ) : cinemaGroups.length === 0 ? (
         <View style={[styles.centeredState, { padding: spacing.xl }]}>
@@ -479,117 +569,117 @@ export const ShowtimesScreen: React.FC<ShowtimesScreenProps> = ({
                       <Rect width="100%" height="100%" fill={`url(#cardFadeV_${group.cinemaId})`} />
                     </Svg>
                   </View>
-                <Text
-                  allowFontScaling
-                  accessibilityRole="header"
-                  style={[
-                    styles.cinemaName,
-                    {
-                      color: colors.on_surface,
-                      fontFamily: typography.titleMedium.fontFamily,
-                      fontSize: typography.titleMedium.fontSize,
-                      fontWeight: typography.titleMedium.fontWeight,
-                    },
-                  ]}
-                >
-                  {group.cinemaName}
-                </Text>
-                <Text
-                  allowFontScaling
-                  style={[
-                    styles.cinemaCity,
-                    {
-                      color: colors.on_surface_variant,
-                      fontFamily: typography.bodySmall.fontFamily,
-                      fontSize: typography.bodySmall.fontSize,
-                      marginTop: 2,
-                      marginBottom: spacing.md,
-                    },
-                  ]}
-                >
-                  {group.city}
-                </Text>
+                  <Text
+                    allowFontScaling
+                    accessibilityRole="header"
+                    style={[
+                      styles.cinemaName,
+                      {
+                        color: colors.on_surface,
+                        fontFamily: typography.titleMedium.fontFamily,
+                        fontSize: typography.titleMedium.fontSize,
+                        fontWeight: typography.titleMedium.fontWeight,
+                      },
+                    ]}
+                  >
+                    {group.cinemaName}
+                  </Text>
+                  <Text
+                    allowFontScaling
+                    style={[
+                      styles.cinemaCity,
+                      {
+                        color: colors.on_surface_variant,
+                        fontFamily: typography.bodySmall.fontFamily,
+                        fontSize: typography.bodySmall.fontSize,
+                        marginTop: 2,
+                        marginBottom: spacing.md,
+                      },
+                    ]}
+                  >
+                    {group.city}
+                  </Text>
 
-                {/* Time Tiles Grid */}
-                <View style={styles.tilesGrid}>
-                  {group.items.map((st) => {
-                    const isSoldOut = st.isCancelled;
-                    const priceText = formatKoboToNaira(st.priceKobo);
-                    const timeStr = formatShowtimeHours(st.startsAt);
+                  {/* Time Tiles Grid */}
+                  <View style={styles.tilesGrid}>
+                    {group.items.map((st) => {
+                      const isSoldOut = st.isCancelled;
+                      const priceText = formatKoboToNaira(st.priceKobo);
+                      const timeStr = formatShowtimeHours(st.startsAt);
 
-                    return (
-                      <Pressable
-                        key={st.id}
-                        onPress={() => onSelectShowtime(st)}
-                        disabled={isSoldOut}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${timeStr}, ${st.hallName}, ${priceText}${isSoldOut ? ', sold out' : ''}`}
-                        accessibilityState={{ disabled: isSoldOut }}
-                        style={({ pressed }) => [
-                          styles.timeTile,
-                          {
-                            backgroundColor: isSoldOut
-                              ? colors.surface_container_highest
-                              : pressed
-                              ? colors.surface_container_high
-                              : colors.surface_container,
-                            borderColor: colors.outline_variant,
-                            borderRadius: radius.sm,
-                            padding: spacing.sm,
-                            opacity: isSoldOut ? 0.5 : 1,
-                          },
-                        ]}
-                      >
-                        <Text
-                          allowFontScaling
-                          style={[
-                            styles.timeText,
+                      return (
+                        <Pressable
+                          key={st.id}
+                          onPress={() => onSelectShowtime(st)}
+                          disabled={isSoldOut}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${timeStr}, ${st.hallName}, ${priceText}${isSoldOut ? ', sold out' : ''}`}
+                          accessibilityState={{ disabled: isSoldOut }}
+                          style={({ pressed }) => [
+                            styles.timeTile,
                             {
-                              color: colors.on_surface,
-                              fontFamily: typography.titleMedium.fontFamily,
-                              fontSize: typography.titleMedium.fontSize,
-                              fontWeight: '700',
+                              backgroundColor: isSoldOut
+                                ? colors.surface_container_highest
+                                : pressed
+                                  ? colors.surface_container_high
+                                  : colors.surface_container,
+                              borderColor: colors.outline_variant,
+                              borderRadius: radius.sm,
+                              padding: spacing.sm,
+                              opacity: isSoldOut ? 0.5 : 1,
                             },
                           ]}
                         >
-                          {timeStr}
-                        </Text>
-                        <Text
-                          allowFontScaling
-                          style={[
-                            styles.hallText,
-                            {
-                              color: colors.on_surface_variant,
-                              fontFamily: typography.labelSmall.fontFamily,
-                              fontSize: 10,
-                              marginTop: 2,
-                            },
-                          ]}
-                        >
-                          {st.hallName}
-                        </Text>
-                        <Text
-                          allowFontScaling
-                          style={[
-                            styles.priceText,
-                            {
-                              color: colors.primary,
-                              fontFamily: typography.labelSmall.fontFamily,
-                              fontSize: typography.labelSmall.fontSize,
-                              fontWeight: '600',
-                              marginTop: 4,
-                            },
-                          ]}
-                        >
-                          {isSoldOut ? STRINGS.showtimes.soldOut : priceText}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                          <Text
+                            allowFontScaling
+                            style={[
+                              styles.timeText,
+                              {
+                                color: colors.on_surface,
+                                fontFamily: typography.titleMedium.fontFamily,
+                                fontSize: typography.titleMedium.fontSize,
+                                fontWeight: '700',
+                              },
+                            ]}
+                          >
+                            {timeStr}
+                          </Text>
+                          <Text
+                            allowFontScaling
+                            style={[
+                              styles.hallText,
+                              {
+                                color: colors.on_surface_variant,
+                                fontFamily: typography.labelSmall.fontFamily,
+                                fontSize: 10,
+                                marginTop: 2,
+                              },
+                            ]}
+                          >
+                            {st.hallName}
+                          </Text>
+                          <Text
+                            allowFontScaling
+                            style={[
+                              styles.priceText,
+                              {
+                                color: colors.primary,
+                                fontFamily: typography.labelSmall.fontFamily,
+                                fontSize: typography.labelSmall.fontSize,
+                                fontWeight: '600',
+                                marginTop: 4,
+                              },
+                            ]}
+                          >
+                            {isSoldOut ? STRINGS.showtimes.soldOut : priceText}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })}
           </View>
 
           {/* Footer Photo after last cinema card with top fade, dim overlay, and lettering watermark */}
@@ -715,6 +805,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  preparingText: {
+    textAlign: 'center',
   },
   scrollContent: {
     width: '100%',

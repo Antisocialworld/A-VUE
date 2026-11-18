@@ -26,6 +26,26 @@ export const movieShowtimesResponseSchema = z.object({
 });
 
 // ==============================================================================
+// On-Demand Showtimes Ensure Schemas
+// ==============================================================================
+export const ensureMovieShowtimesParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const ensureMovieShowtimesReasonSchema = z.enum([
+  'NOT_ELIGIBLE',
+  'TMDB_UNAVAILABLE',
+  'NO_CAPACITY',
+  'CAP_REACHED',
+]);
+
+// Always HTTP 200: the app asks for showtimes, and "nothing to add" is a normal outcome.
+export const ensureMovieShowtimesResponseSchema = z.object({
+  created: z.number().int().nonnegative(),
+  reason: ensureMovieShowtimesReasonSchema.optional(),
+});
+
+// ==============================================================================
 // Seat Map Schemas
 // ==============================================================================
 export const seatStateEnum = z.enum(['available', 'held', 'sold']);

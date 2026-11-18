@@ -36,6 +36,38 @@
         "expectedValid": false
       }
     ],
+    "ensureMovieShowtimesResponse": [
+      {
+        "description": "Valid ensure response: showtimes created",
+        "input": {
+          "created": 4
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Valid ensure response: nothing created with a reason",
+        "input": {
+          "created": 0,
+          "reason": "NO_CAPACITY"
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Invalid ensure response: negative created count",
+        "input": {
+          "created": -1
+        },
+        "expectedValid": false
+      },
+      {
+        "description": "Invalid ensure response: unknown reason",
+        "input": {
+          "created": 0,
+          "reason": "SOMETHING_ELSE"
+        },
+        "expectedValid": false
+      }
+    ],
     "seatMapItem": [
       {
         "description": "Valid available seat",

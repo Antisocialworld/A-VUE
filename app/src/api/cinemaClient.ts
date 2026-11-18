@@ -3,6 +3,8 @@ import {
   CheckoutResponse,
   checkoutBodySchema,
   checkoutResponseSchema,
+  EnsureMovieShowtimesResponse,
+  ensureMovieShowtimesResponseSchema,
   GenerateQrResponse,
   generateQrResponseSchema,
   HoldSeatsBody,
@@ -113,6 +115,20 @@ export class CinemaClient {
       method: 'GET',
     });
     return movieShowtimesResponseSchema.parse(data);
+  }
+
+  /**
+   * Asks the backend to prepare on-demand showtimes for a movie.
+   * Idempotent and safe to call when showtimes already exist.
+   * POST /movies/:id/showtimes/ensure
+   */
+  public async ensureMovieShowtimes(
+    movieId: string | number
+  ): Promise<EnsureMovieShowtimesResponse> {
+    const { data } = await this.request<any>(`/movies/${movieId}/showtimes/ensure`, {
+      method: 'POST',
+    });
+    return ensureMovieShowtimesResponseSchema.parse(data);
   }
 
   /**

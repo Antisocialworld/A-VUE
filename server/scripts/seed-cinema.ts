@@ -10,13 +10,22 @@
  * - Never prints connection strings or secrets.
  * - Populates both `screens` and `halls` for API compatibility.
  * - Populates `seats` with both migration 001 and migration 002 column sets.
+ * - Requires migration 007: writes screens.price_kobo for every SEED_HALLS entry.
  * - Generates showtimes for the next 8 days at 13:00, 16:30, and 20:00 Africa/Lagos time (+01:00).
- * - Distributes showtimes across halls with integer kobo pricing per hall.
+ * - Seeds showtimes on one screen per cinema: the lowest-id screen from SEED_HALLS.
+ * - Rotates movies deterministically across 6 cells per day (2 screens x 3 slots).
+ * - Guards showtime inserts on (screen_id, starts_at) only, with no ON CONFLICT,
+ *   so the script works both before and after migration 006 adds the unique index.
+ * - Leaves `source` unset; migration 006 defaults it to 'seed'.
  * - Exit code 0 on success.
  */
 
 import { writerPool } from '../src/lib/db.js';
 import { getNowPlayingMovies } from '../src/lib/tmdb.js';
+import {
+  buildSeedShowtimes,
+  selectLowestIdScreenPerCinema,
+} from '../src/lib/seedSchedule.js';
 
 interface CinemaData {
   id: string;
@@ -118,8 +127,10 @@ export const SEED_HALLS: HallData[] = [
  * Calculates calendar dates for the next 8 days in Africa/Lagos timezone (UTC+1).
  * Slots: 13:00, 16:30, 20:00 Africa/Lagos.
  */
-export function getLagosScheduleSlots(daysCount = 8): { dateStr: string; times: string[] }[] {
-  const now = new Date();
+export function getLagosScheduleSlots(
+  daysCount = 8,
+  now: Date = new Date(),
+): { dateStr: string; times: string[] }[] {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
@@ -213,6 +224,13 @@ export async function seedCinema(): Promise<void> {
         [hall.id, hall.cinemaId, hall.name, hall.totalSeats]
       );
 
+      // Screens carry their own price (migration 007). Updating by id keeps
+      // re-runs idempotent and covers screens with no showtime history.
+      await client.query(
+        `UPDATE screens SET price_kobo = $2 WHERE id = $1`,
+        [hall.id, hall.priceKobo]
+      );
+
       await client.query(
         `INSERT INTO halls (id, cinema_id, name, total_seats)
          VALUES ($1, $2, $3, $4)
@@ -240,34 +258,26 @@ export async function seedCinema(): Promise<void> {
       }
     }
 
-    // 4. Seed Showtimes (next 8 days at 13:00, 16:30, 20:00 Africa/Lagos time)
+    // 4. Seed Showtimes (next 8 days at 13:00, 16:30, 20:00 Africa/Lagos time).
+    //    One screen per cinema (lowest id), deterministic 6-cell daily movie rotation.
     const schedule = getLagosScheduleSlots(8);
+    const showtimeScreens = selectLowestIdScreenPerCinema(SEED_HALLS);
+    const showtimeRows = buildSeedShowtimes(movieIds, showtimeScreens, schedule);
 
-    for (let mIdx = 0; mIdx < movieIds.length; mIdx++) {
-      const movieId = movieIds[mIdx];
+    console.log(
+      `[Cinema Seed] Showtime screens: ${showtimeScreens.map((s) => s.name).join(', ')}`
+    );
 
-      for (let d = 0; d < schedule.length; d++) {
-        const { dateStr, times } = schedule[d];
-
-        for (let slotIdx = 0; slotIdx < times.length; slotIdx++) {
-          const timeStr = times[slotIdx];
-          const startsAtIso = `${dateStr}T${timeStr}:00+01:00`;
-
-          // Spread across the 4 halls deterministically
-          const hall = SEED_HALLS[(mIdx + slotIdx + d) % SEED_HALLS.length];
-          const priceKobo = hall.priceKobo;
-
-          await client.query(
-            `INSERT INTO showtimes (movie_id, screen_id, hall_id, starts_at, price_kobo)
-             SELECT $1, $2, $2, $3::timestamptz, $4
-             WHERE NOT EXISTS (
-               SELECT 1 FROM showtimes
-               WHERE movie_id = $1 AND screen_id = $2 AND starts_at = $3::timestamptz
-             )`,
-            [movieId, hall.id, startsAtIso, priceKobo]
-          );
-        }
-      }
+    for (const row of showtimeRows) {
+      await client.query(
+        `INSERT INTO showtimes (movie_id, screen_id, hall_id, starts_at, price_kobo)
+         SELECT $1, $2, $2, $3::timestamptz, $4
+         WHERE NOT EXISTS (
+           SELECT 1 FROM showtimes
+           WHERE screen_id = $2 AND starts_at = $3::timestamptz
+         )`,
+        [row.movieId, row.screenId, row.startsAt, row.priceKobo]
+      );
     }
 
     await client.query('COMMIT');

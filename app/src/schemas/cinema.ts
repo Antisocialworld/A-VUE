@@ -30,6 +30,25 @@ export const movieShowtimesResponseSchema = z.object({
 export type MovieShowtimesResponse = z.infer<typeof movieShowtimesResponseSchema>;
 
 // ==============================================================================
+// On-Demand Showtimes Ensure Schemas
+// ==============================================================================
+export const ensureMovieShowtimesReasonSchema = z.enum([
+  'NOT_ELIGIBLE',
+  'TMDB_UNAVAILABLE',
+  'NO_CAPACITY',
+  'CAP_REACHED',
+]);
+
+export type EnsureMovieShowtimesReason = z.infer<typeof ensureMovieShowtimesReasonSchema>;
+
+export const ensureMovieShowtimesResponseSchema = z.object({
+  created: z.number().int().nonnegative(),
+  reason: ensureMovieShowtimesReasonSchema.optional(),
+});
+
+export type EnsureMovieShowtimesResponse = z.infer<typeof ensureMovieShowtimesResponseSchema>;
+
+// ==============================================================================
 // Seat Map Schemas
 // ==============================================================================
 export const seatStateEnum = z.enum(['available', 'held', 'sold']);
