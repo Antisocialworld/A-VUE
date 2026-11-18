@@ -243,7 +243,7 @@ export const TicketScreen: React.FC<TicketScreenProps> = ({
                   },
                 ]}
               >
-                {ticket.movieTitle || 'Movie Ticket'}
+                {ticket.movieTitle || STRINGS.tickets.movieTitleFallback}
               </Text>
               <Text
                 allowFontScaling

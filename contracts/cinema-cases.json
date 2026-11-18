@@ -157,12 +157,28 @@
     ],
     "ticketItem": [
       {
-        "description": "Valid active ticket item",
+        "description": "Valid active ticket item with title present",
         "input": {
           "id": "88888888-8888-8888-8888-888888888888",
           "bookingId": "99999999-9999-9999-9999-999999999999",
           "showtimeId": "11111111-1111-1111-1111-111111111111",
           "movieTitle": "Gladiator II",
+          "cinemaName": "Grand Cinema Victoria Island",
+          "hallName": "Grand Hall 1",
+          "row": "G",
+          "number": 12,
+          "startsAt": "2026-11-20T18:00:00.000Z",
+          "status": "active",
+          "createdAt": "2026-11-14T10:00:00.000Z"
+        },
+        "expectedValid": true
+      },
+      {
+        "description": "Valid active ticket item with title absent",
+        "input": {
+          "id": "88888888-8888-8888-8888-888888888888",
+          "bookingId": "99999999-9999-9999-9999-999999999999",
+          "showtimeId": "11111111-1111-1111-1111-111111111111",
           "cinemaName": "Grand Cinema Victoria Island",
           "hallName": "Grand Hall 1",
           "row": "G",

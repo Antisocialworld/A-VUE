@@ -305,6 +305,8 @@ export const STRINGS = {
       'You have not booked any cinema tickets yet. Explore now playing movies and reserve your view.',
     browseMoviesAction: 'Browse movies',
     ticketDetailTitle: 'Cinema Ticket',
+    movieTitleFallback: 'Movie Ticket',
+    movieTitleAccessibilityFallback: 'Movie',
     qrRefreshAction: 'Refresh QR',
     qrSecurityNote: 'Present this QR code at the cinema entrance. Dynamic security refreshes on every open.',
     activeStatus: 'Active',

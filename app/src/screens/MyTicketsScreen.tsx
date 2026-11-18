@@ -93,7 +93,7 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
       <Pressable
         onPress={() => onSelectTicket(item)}
         accessibilityRole="button"
-        accessibilityLabel={`${item.movieTitle || 'Movie'}, ${item.cinemaName}, Row ${item.row} Seat ${item.number}, ${item.status}`}
+        accessibilityLabel={`${item.movieTitle || STRINGS.tickets.movieTitleAccessibilityFallback}, ${item.cinemaName}, Row ${item.row} Seat ${item.number}, ${item.status}`}
         style={({ pressed }) => [
           styles.ticketItemCard,
           {
@@ -123,7 +123,7 @@ export const MyTicketsScreen: React.FC<MyTicketsScreenProps> = ({
               },
             ]}
           >
-            {item.movieTitle || 'Movie Ticket'}
+            {item.movieTitle || STRINGS.tickets.movieTitleFallback}
           </Text>
 
           <View

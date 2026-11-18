@@ -2,7 +2,76 @@ import crypto from 'node:crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isAdmin } from '../env.js';
 import { writerPool } from '../lib/db.js';
+import { getMovieDetails } from '../lib/tmdb.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
+
+const MAX_TICKET_TITLE_LOOKUPS = 25;
+const TICKET_TITLE_LOOKUP_TIMEOUT_MS = 1500;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('timeout'));
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function resolveTicketMovieTitles(
+  movieIds: Array<string | number>,
+): Promise<Map<string, string>> {
+  const uniqueIds = Array.from(
+    new Set(movieIds.map((id) => String(id)).filter((id) => id.length > 0)),
+  );
+  const idsToLookup = uniqueIds.slice(0, MAX_TICKET_TITLE_LOOKUPS);
+  const titles = new Map<string, string>();
+
+  await Promise.all(
+    idsToLookup.map(async (idStr) => {
+      const numericId = Number(idStr);
+      if (!Number.isInteger(numericId) || numericId <= 0) {
+        process.stderr.write(
+          `[Tickets] movie_title_lookup movie_id=${idStr} reason=invalid_id\n`,
+        );
+        return;
+      }
+
+      try {
+        const result = await withTimeout(
+          getMovieDetails(numericId),
+          TICKET_TITLE_LOOKUP_TIMEOUT_MS,
+        );
+        const title = result?.movie?.title;
+        if (typeof title === 'string' && title.length > 0) {
+          titles.set(idStr, title);
+          return;
+        }
+
+        process.stderr.write(
+          `[Tickets] movie_title_lookup movie_id=${idStr} reason=not_found\n`,
+        );
+      } catch (err: any) {
+        const reason =
+          err?.message === 'timeout'
+            ? 'timeout'
+            : err?.message === 'TMDB_UNAVAILABLE'
+              ? 'tmdb_unavailable'
+              : 'error';
+        process.stderr.write(
+          `[Tickets] movie_title_lookup movie_id=${idStr} reason=${reason}\n`,
+        );
+      }
+    }),
+  );
+
+  return titles;
+}
 
 export async function ticketRoutes(fastify: FastifyInstance) {
   /**
@@ -48,19 +117,27 @@ export async function ticketRoutes(fastify: FastifyInstance) {
       [user.id]
     );
 
-    const tickets = result.rows.map((row: any) => ({
-      id: row.id,
-      bookingId: row.booking_id,
-      showtimeId: row.showtime_id,
-      movieId: row.movie_id,
-      cinemaName: row.cinema_name,
-      hallName: row.hall_name,
-      row: row.row,
-      number: Number(row.number),
-      startsAt: new Date(row.starts_at).toISOString(),
-      status: row.status,
-      createdAt: new Date(row.created_at).toISOString(),
-    }));
+    const movieTitleMap = await resolveTicketMovieTitles(
+      result.rows.map((row: any) => row.movie_id),
+    );
+
+    const tickets = result.rows.map((row: any) => {
+      const movieTitle = movieTitleMap.get(String(row.movie_id));
+      return {
+        id: row.id,
+        bookingId: row.booking_id,
+        showtimeId: row.showtime_id,
+        movieId: row.movie_id,
+        ...(movieTitle ? { movieTitle } : {}),
+        cinemaName: row.cinema_name,
+        hallName: row.hall_name,
+        row: row.row,
+        number: Number(row.number),
+        startsAt: new Date(row.starts_at).toISOString(),
+        status: row.status,
+        createdAt: new Date(row.created_at).toISOString(),
+      };
+    });
 
     return reply.status(200).send({ tickets });
   });
