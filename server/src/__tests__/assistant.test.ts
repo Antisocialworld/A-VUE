@@ -549,9 +549,9 @@ describe('assistant fallback and failure logging', () => {
   });
 
   it('uses the configured timeout and caps the fallback so both attempts stay under the app 25 s deadline', async () => {
-    const realNow = Date.now;
-    let elapsedOffsetMs = 0;
-    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + elapsedOffsetMs);
+    const fixedNow = 1_700_000_000_000;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(fixedNow);
     let server: Awaited<ReturnType<typeof buildTestServer>> | undefined;
 
     try {
@@ -562,7 +562,7 @@ describe('assistant fallback and failure logging', () => {
       const { AssistantGenerationError } = await import('../lib/assistant/model.js');
       mockGenerate
         .mockImplementationOnce(async () => {
-          elapsedOffsetMs = 15000;
+          vi.setSystemTime(fixedNow + 15000);
           throw new AssistantGenerationError('slow primary failed', { status: 503 });
         })
         .mockResolvedValueOnce('Fallback reply');
@@ -578,7 +578,7 @@ describe('assistant fallback and failure logging', () => {
       expect(15000 + mockGenerate.mock.calls[1][0].timeoutMs).toBeLessThan(25000);
     } finally {
       if (server) await server.close();
-      nowSpy.mockRestore();
+      vi.useRealTimers();
     }
   });
 
