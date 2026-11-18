@@ -15,11 +15,83 @@ export interface CreatePaymentLinkParams {
   userEmail: string;
   movieTitle?: string;
   redirectUrl?: string;
+  /**
+   * Required in simulator mode. Base URL (scheme + host[:port]) reachable by the client.
+   * Must be derived from a validated request host or PUBLIC_API_URL; never from env.HOST.
+   */
+  simulatorBaseUrl?: string;
 }
 
 export interface CreatePaymentLinkResult {
   paymentLink: string;
   isSimulated: boolean;
+}
+
+export interface ResolveSimulatorBaseUrlInput {
+  publicApiUrl?: string;
+  protocol: string;
+  hostHeader?: string | string[];
+  forwardedHost?: string | string[];
+  forwardedProto?: string | string[];
+  trustProxy: boolean | number;
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0]?.trim();
+  if (typeof value === 'string') return value.split(',')[0]?.trim();
+  return undefined;
+}
+
+function isLoopbackOrUnspecifiedHost(host: string): boolean {
+  const hostname = host.split(':', 1)[0]?.toLowerCase() || '';
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '::1' || hostname === '[::1]';
+}
+
+/**
+ * Validates a simulator base URL host and returns a safe "protocol://host[:port]" origin.
+ * Host must contain only letters, digits, dots, hyphens, and an optional :port.
+ * Never emits 0.0.0.0, 127.0.0.1, localhost, or untrusted/malformed input.
+ */
+export function resolveSimulatorBaseUrl(input: ResolveSimulatorBaseUrlInput): string | null {
+  const tryOrigin = (candidate: string | undefined, allowProtocolOverride = true): string | null => {
+    if (!candidate) return null;
+    try {
+      const url = new URL(candidate);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      if (url.username || url.password) return null;
+      if (!url.host) return null;
+      // letters, digits, dots, hyphens, optional :port only
+      if (!/^[A-Za-z0-9.-]+(?::\d+)?$/.test(url.host)) return null;
+      if (isLoopbackOrUnspecifiedHost(url.host)) return null;
+      if (!allowProtocolOverride && url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return null;
+    }
+  };
+
+  // 1) Explicit PUBLIC_API_URL (if set and valid)
+  const fromPublic = tryOrigin(input.publicApiUrl);
+  if (fromPublic) return fromPublic;
+
+  // 2) Derive from request, honoring TRUST_PROXY/forwarded headers the same way the server does
+  const trustProxy = input.trustProxy === true || (typeof input.trustProxy === 'number' && input.trustProxy > 0);
+  const forwardedProto = firstHeaderValue(input.forwardedProto)?.toLowerCase();
+  const forwardedHost = firstHeaderValue(input.forwardedHost);
+  const hostHeader = firstHeaderValue(input.hostHeader);
+
+  let protocol = (input.protocol || 'http').toLowerCase();
+  if (trustProxy && (forwardedProto === 'http' || forwardedProto === 'https')) {
+    protocol = forwardedProto;
+  }
+  if (protocol !== 'http' && protocol !== 'https') protocol = 'http';
+
+  const host = trustProxy && forwardedHost ? forwardedHost : hostHeader;
+  if (!host) return null;
+  if (!/^[A-Za-z0-9.-]+(?::\d+)?$/.test(host)) return null;
+  if (isLoopbackOrUnspecifiedHost(host)) return null;
+
+  return `${protocol}://${host}`;
 }
 
 /**
@@ -69,7 +141,11 @@ export async function createFlutterwavePaymentLink(
 ): Promise<CreatePaymentLinkResult> {
   // 1. Payment Simulator Mode (Development & Test only - strictly refused in production by env.ts)
   if (env.PAYMENT_SIMULATOR) {
-    const simLink = `http://${env.HOST}:${env.PORT}/dev/simulate-payment?tx_ref=${encodeURIComponent(params.txRef)}&amount=${params.amountKobo}`;
+    const baseUrl = params.simulatorBaseUrl;
+    if (!baseUrl) {
+      throw new Error('SIMULATOR_BASE_URL_UNAVAILABLE');
+    }
+    const simLink = `${baseUrl}/dev/simulate-payment?tx_ref=${encodeURIComponent(params.txRef)}&amount=${params.amountKobo}`;
     return {
       paymentLink: simLink,
       isSimulated: true,

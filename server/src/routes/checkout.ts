@@ -1,12 +1,27 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from '../env.js';
 import { writerPool } from '../lib/db.js';
-import { createFlutterwavePaymentLink, isFlutterwaveTestMode } from '../lib/flutterwave.js';
+import {
+  createFlutterwavePaymentLink,
+  isFlutterwaveTestMode,
+  resolveSimulatorBaseUrl,
+} from '../lib/flutterwave.js';
 import { verifyUserHolds } from '../lib/holds.js';
 import { processWebhookEvent } from '../lib/jobs.js';
 import { checkoutRateLimit } from '../lib/rateLimit.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 import { checkoutBodySchema } from '../schemas/cinema.js';
+
+function getSimulatorBaseUrlForRequest(request: FastifyRequest): string | undefined {
+  return resolveSimulatorBaseUrl({
+    publicApiUrl: env.PUBLIC_API_URL,
+    protocol: request.protocol,
+    hostHeader: request.headers.host,
+    forwardedHost: request.headers['x-forwarded-host'],
+    forwardedProto: request.headers['x-forwarded-proto'],
+    trustProxy: env.TRUST_PROXY,
+  }) ?? undefined;
+}
 
 export async function checkoutRoutes(fastify: FastifyInstance) {
   /**
@@ -81,11 +96,13 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
 
     if (existingPaymentRes.rows.length > 0) {
       const existing = existingPaymentRes.rows[0];
+      const simulatorBaseUrl = getSimulatorBaseUrlForRequest(request);
       const linkRes = await createFlutterwavePaymentLink({
         paymentId: existing.id,
         txRef: existing.provider_ref,
         amountKobo: Number(existing.amount_kobo),
         userEmail: user.email,
+        simulatorBaseUrl,
       });
 
       return reply.status(200).send({
@@ -177,12 +194,14 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
       await client.query('COMMIT');
 
       // 6. Generate Flutterwave hosted checkout link or simulated link
+      const simulatorBaseUrl = getSimulatorBaseUrlForRequest(request);
       const linkResult = await createFlutterwavePaymentLink({
         paymentId,
         txRef,
         amountKobo: totalAmountKobo,
         userEmail: user.email,
         movieTitle: 'A VUE Cinema Tickets',
+        simulatorBaseUrl,
       });
 
       return reply.status(200).send({
@@ -222,8 +241,11 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
 
     const { tx_ref } = request.query as { tx_ref?: string };
     if (!tx_ref) {
+      process.stderr.write('[Dev Simulator] simulate-payment hit: missing tx_ref\n');
       return reply.status(400).send({ error: 'Missing tx_ref' });
     }
+
+    process.stderr.write('[Dev Simulator] simulate-payment hit\n');
 
     const pool = writerPool;
     const paymentRes = await pool.query(
@@ -232,6 +254,7 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
     );
 
     if (paymentRes.rows.length === 0) {
+      process.stderr.write('[Dev Simulator] simulate-payment outcome: payment_id=unknown status=not_found\n');
       return reply.status(404).send({ error: 'Payment not found' });
     }
 
@@ -257,6 +280,10 @@ export async function checkoutRoutes(fastify: FastifyInstance) {
 
     // Process event immediately
     const procResult = await processWebhookEvent(eventId);
+    const resultStatus = (procResult as { status?: string } | null)?.status ?? 'unknown';
+    process.stderr.write(
+      `[Dev Simulator] simulate-payment outcome: payment_id=${payment.id} status=${resultStatus}\n`
+    );
 
     return reply.status(200).send({
       simulated: true,

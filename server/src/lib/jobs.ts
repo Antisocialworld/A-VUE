@@ -121,7 +121,7 @@ export async function processWebhookEvent(eventId: string): Promise<ProcessWebho
 
     // 2. Fetch payment record by provider_ref (tx_ref)
     const paymentRes = await client.query(
-      `SELECT p.id, p.user_id, p.amount_kobo, p.fee_kobo, p.status, p.idempotency_key,
+      `SELECT p.id, p.user_id, p.amount_kobo, p.fee_kobo, p.status, p.idempotency_key, p.provider_ref,
               u.email
        FROM payments p
        JOIN users u ON u.id = p.user_id
@@ -182,7 +182,7 @@ export async function processWebhookEvent(eventId: string): Promise<ProcessWebho
 
     const mismatch = checkTransactionMismatch(verifiedDetails, {
       amountKobo: Number(payment.amount_kobo),
-      txRef: payment.idempotency_key || txRef,
+      txRef: payment.provider_ref || txRef,
     });
 
     if (!mismatch.valid) {

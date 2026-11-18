@@ -156,6 +156,49 @@ describe('Webhooks, Flutterwave & Tickets — Fix Pass 2 (Tasks 1–5)', () => {
       expect(res.mismatchType).toBeUndefined();
     });
 
+    it('succeeds when provider tx_ref (provider_ref) matches even if idempotency_key differs (production shape)', () => {
+      // In production, payments.idempotency_key is a client-supplied key while
+      // payments.provider_ref is the server-generated provider reference (avue_<paymentId>).
+      const providerRef = 'avue_550e8400e29b41d4a716446655440000';
+      const actualTxRef = providerRef;
+      const res = checkTransactionMismatch(
+        { status: 'successful', amountKobo: 500000, currency: 'NGN', txRef: actualTxRef },
+        { amountKobo: 500000, txRef: providerRef }
+      );
+      expect(res.valid).toBe(true);
+      expect(res.mismatchType).toBeUndefined();
+    });
+
+    it('still flags when provider tx_ref is wrong even if a different idempotency context exists', () => {
+      const expectedProviderRef = 'avue_550e8400e29b41d4a716446655440000';
+      const wrongProviderTxRef = 'avue_deadbeefdeadbeefdeadbeefdeadbeef';
+      const res = checkTransactionMismatch(
+        { status: 'successful', amountKobo: 500000, currency: 'NGN', txRef: wrongProviderTxRef },
+        { amountKobo: 500000, txRef: expectedProviderRef }
+      );
+      expect(res.valid).toBe(false);
+      expect(res.mismatchType).toBe('tx_ref');
+      expect(res.reason).toContain('tx_ref mismatch');
+    });
+
+    it('processWebhookEvent compares against payment.provider_ref and keeps idempotency_key for meta lookup only', () => {
+      const jobsPath = path.resolve(__dirname, '../lib/jobs.ts');
+      const jobsSrc = fs.readFileSync(jobsPath, 'utf-8');
+
+      // Expected tx_ref for verification must come from the stored provider reference (not idempotency key).
+      expect(jobsSrc).toContain('txRef: payment.provider_ref || txRef');
+      expect(jobsSrc).not.toContain('txRef: payment.idempotency_key || txRef');
+
+      // Idempotency key remains the lookup key for checkout metadata (seatIds/showtimeId).
+      expect(jobsSrc).toContain(
+        "`SELECT response_body FROM idempotency_keys WHERE key = $1 AND user_id = $2`"
+      );
+      expect(jobsSrc).toContain('[payment.idempotency_key, payment.user_id]');
+
+      // Payment fetch must include provider_ref for mismatch validation.
+      expect(jobsSrc).toContain('p.idempotency_key, p.provider_ref');
+    });
+
     it('confirms migration 004 extends payments_status_check to allow "flagged"', () => {
       const mig004Path = path.resolve(__dirname, '../../migrations/004_payments_flagged_status.sql');
       expect(fs.existsSync(mig004Path)).toBe(true);

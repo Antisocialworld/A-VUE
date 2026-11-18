@@ -100,6 +100,11 @@ const envSchema = z.object({
     .string()
     .transform((val) => val === 'true')
     .default('false'),
+  PUBLIC_API_URL: z.preprocess((val) => {
+    if (typeof val !== 'string') return undefined;
+    const trimmed = val.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().optional()),
 
   // Email
   SMTP_HOST: z.string().default('localhost'),
