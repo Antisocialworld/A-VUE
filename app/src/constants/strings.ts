@@ -387,6 +387,15 @@ export const STRINGS = {
     sendAction: 'Send message',
     typing: 'Typing...',
     fabAccessibilityLabel: 'Ask A VUE assistant',
+    movie: {
+      viewDetails: 'View details',
+      viewDetailsAccessibilityLabel: (title: string) => `View details for ${title}`,
+      posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
+      cardAccessibilityLabel: (title: string) => `Movie details for ${title}`,
+      titleAccessibilityLabel: (title: string) => `Movie title: ${title}`,
+      yearAccessibilityLabel: (year: string) => `Release year: ${year}`,
+      overviewAccessibilityLabel: (title: string) => `Overview for ${title}`,
+    },
     errors: {
       tooMany: 'Ask A VUE is busy right now. Try again shortly.',
       badRequest: 'That message could not be sent.',

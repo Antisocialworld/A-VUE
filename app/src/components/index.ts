@@ -24,4 +24,5 @@ export * from './SearchIcon';
 export * from './WebColumn';
 export * from './AssistantChat';
 export * from './AssistantPanel';
+export * from './AssistantMovieCard';
 

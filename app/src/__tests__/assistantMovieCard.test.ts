@@ -1,0 +1,118 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { parseAssistantChatResponse } from '../api/assistantClient';
+import { STRINGS } from '../constants/strings';
+
+const appRoot = path.resolve(__dirname, '..');
+const appEntry = path.resolve(__dirname, '../../App.tsx');
+const cardPath = path.join(appRoot, 'components/AssistantMovieCard.tsx');
+const chatPath = path.join(appRoot, 'components/AssistantChat.tsx');
+const cardSrc = fs.readFileSync(cardPath, 'utf-8');
+const chatSrc = fs.readFileSync(chatPath, 'utf-8');
+const tmdbHost = ['image', 'tmdb', 'org'].join('.');
+
+function productionSources(dir: string, fileList: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      productionSources(full, fileList);
+    } else if (/\.tsx?$/.test(entry.name)) {
+      fileList.push(full);
+    }
+  }
+  return fileList;
+}
+
+const validMovie = {
+  tmdbId: 123,
+  title: 'Example',
+  year: '2026',
+  overview: 'A short overview.',
+  posterPath: 'abc123.jpg',
+};
+
+describe('Ask A VUE movie card', () => {
+  it('parses a valid optional movie without losing the reply text', () => {
+    expect(
+      parseAssistantChatResponse({ reply: 'Here is what I found.', movie: validMovie }),
+    ).toEqual({ reply: 'Here is what I found.', movie: validMovie });
+
+    expect(
+      parseAssistantChatResponse({
+        reply: 'Here is what I found.',
+        movie: { ...validMovie, year: null, posterPath: null },
+      }),
+    ).toEqual({
+      reply: 'Here is what I found.',
+      movie: { ...validMovie, year: null, posterPath: null },
+    });
+  });
+
+  it('ignores invalid movie shapes and still returns the reply text', () => {
+    const invalidMovies = [
+      { ...validMovie, tmdbId: '123' },
+      { ...validMovie, posterPath: 42 },
+      { ...validMovie, extra: true },
+      null,
+    ];
+
+    for (const movie of invalidMovies) {
+      expect(() => parseAssistantChatResponse({ reply: 'Plain reply', movie })).not.toThrow();
+      expect(parseAssistantChatResponse({ reply: 'Plain reply', movie })).toEqual({
+        reply: 'Plain reply',
+      });
+    }
+  });
+
+  it('still rejects malformed response envelopes', () => {
+    expect(() => parseAssistantChatResponse({ reply: 7 })).toThrow();
+    expect(() => parseAssistantChatResponse({ reply: 'Hi', unexpected: true })).toThrow();
+  });
+
+  it('keeps the TMDB host out of card source and all production app sources', () => {
+    expect(cardSrc).not.toContain(tmdbHost);
+    const sources = [...productionSources(appRoot)];
+    if (fs.existsSync(appEntry)) sources.push(appEntry);
+    for (const source of sources) {
+      expect(fs.readFileSync(source, 'utf-8')).not.toContain(tmdbHost);
+    }
+  });
+
+  it('uses the existing w342 poster proxy helper', () => {
+    expect(cardSrc).toContain("moviesClient.getPosterUrl('w342', movie.posterPath)");
+  });
+
+  it('keeps the new labels in the strings file', () => {
+    expect(STRINGS.assistant.movie.viewDetails).toBe('View details');
+    expect(STRINGS.assistant.movie.viewDetailsAccessibilityLabel('Example')).toBe(
+      'View details for Example',
+    );
+    expect(STRINGS.assistant.movie.posterAccessibilityLabel('Example')).toBe('Poster for Example');
+    expect(cardSrc).toContain('{STRINGS.assistant.movie.viewDetails}');
+    expect(cardSrc).toContain(
+      'accessibilityLabel={STRINGS.assistant.movie.posterAccessibilityLabel(movie.title)}',
+    );
+  });
+
+  it('renders an accessible four-line overview card with TMDB attribution', () => {
+    expect(cardSrc).toContain('numberOfLines={4}');
+    expect(cardSrc).toContain('minHeight: 44');
+    expect(cardSrc).toContain("import { TmdbAttribution } from './TmdbAttribution';");
+    expect(cardSrc).toContain('<TmdbAttribution />');
+  });
+
+  it('uses design tokens only', () => {
+    expect(cardSrc).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(cardSrc).toContain('colors.surface_container_low');
+    expect(cardSrc).toContain('colors.on_primary');
+  });
+
+  it('stores the movie on assistant chat state without adding it to model history', () => {
+    expect(chatSrc).toContain('movie?: AssistantMovie');
+    expect(chatSrc).toContain('movie: result.movie');
+    expect(chatSrc).toContain('<AssistantMovieCard movie={item.movie} onViewDetails={onOpenMovie} />');
+    expect(chatSrc).toContain('text: m.text');
+  });
+});

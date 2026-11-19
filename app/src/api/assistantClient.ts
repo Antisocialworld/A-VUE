@@ -8,11 +8,38 @@ export type AssistantHistoryItem = {
   text: string;
 };
 
+export const assistantMovieSchema = z
+  .object({
+    tmdbId: z.number().int().positive(),
+    title: z.string().min(1),
+    year: z.string().nullable(),
+    overview: z.string(),
+    posterPath: z.string().nullable(),
+  })
+  .strict();
+
+export type AssistantMovie = z.infer<typeof assistantMovieSchema>;
+
+export type AssistantChatResponse = {
+  reply: string;
+  movie?: AssistantMovie;
+};
+
 const assistantChatResponseSchema = z
   .object({
     reply: z.string(),
+    movie: z.unknown().optional(),
   })
   .strict();
+
+export function parseAssistantChatResponse(data: unknown): AssistantChatResponse {
+  const parsed = assistantChatResponseSchema.parse(data);
+  const movie = assistantMovieSchema.safeParse(parsed.movie);
+  return {
+    reply: parsed.reply,
+    ...(movie.success ? { movie: movie.data } : {}),
+  };
+}
 
 export class AssistantClient {
   private getBaseUrl(): string {
@@ -96,7 +123,7 @@ export class AssistantClient {
   public async sendChat(input: {
     message: string;
     history?: AssistantHistoryItem[];
-  }): Promise<{ reply: string }> {
+  }): Promise<AssistantChatResponse> {
     const history = (input.history ?? []).slice(-4).map((item) => ({
       role: item.role,
       text: item.text,
@@ -110,7 +137,7 @@ export class AssistantClient {
       }),
     });
 
-    return assistantChatResponseSchema.parse(data);
+    return parseAssistantChatResponse(data);
   }
 }
 

@@ -145,11 +145,11 @@ describe('Task 1: Typo-Tolerant Scoring & Ranking', () => {
   });
 });
 
-describe('Task 1: Redis Cache Key SHA-256 Hashing', () => {
+describe('Task 1: Redis Cache Key BLAKE2s Hashing', () => {
   it('generates a 64-character hex digest and never contains raw query text', () => {
     const rawQuery = 'Top Secret Movie Search Query';
     const normalized = normalizeSearchText(rawQuery);
-    const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+    const hash = crypto.createHash('blake2s256').update(normalized).digest('hex');
     const cacheKey = `search:${hash}`;
 
     // Exactly 64 hex chars following prefix
@@ -164,7 +164,7 @@ describe('Task 1: Redis Cache Key SHA-256 Hashing', () => {
 
   it('stale cache key appends :stale to the hash', () => {
     const normalized = 'batman';
-    const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+    const hash = crypto.createHash('blake2s256').update(normalized).digest('hex');
     const staleKey = `search:${hash}:stale`;
 
     expect(staleKey).toBe(`search:${hash}:stale`);

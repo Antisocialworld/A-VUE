@@ -76,7 +76,7 @@ export async function movieRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // 2. GET /movies/search?q= — Authenticated typo-tolerant search
-  // Rate limited per user and per IP; results cached in Redis via SHA-256 key; query text NEVER logged
+  // Rate limited per user and per IP; results cached in Redis via BLAKE2s key; query text NEVER logged
   fastify.get(
     '/movies/search',
     { preHandler: [requireAuth] },

@@ -181,7 +181,7 @@ export function calculateSearchScore(query: string, candidateTitle: string): num
 
 /**
  * Searches movies with typo-tolerant fuzzy ranking:
- * 1. Checks Redis cache using SHA-256 hash of normalised query text.
+ * 1. Checks Redis cache using BLAKE2s hash of normalised query text.
  * 2. Single-flight upstream query deduplication.
  * 3. TMDB search via tmdb adapter.
  * 4. Merges cached now-playing titles if TMDB returns fewer than 5 candidates.
@@ -190,10 +190,11 @@ export function calculateSearchScore(query: string, candidateTitle: string): num
  * 7. Falls back to stale Redis copy on upstream failure.
  *
  * Privacy rule: Search query text is NEVER logged, printed, or included in any error.
+ * Argon2 cannot be used here (salted and slow, the same query would never give the same key).
  */
 export async function searchMovies(normalizedQ: string): Promise<MoviesSearchResponse> {
-  // ONE newly approved use of SHA-256 for Redis cache key (hex digest)
-  const hash = crypto.createHash('sha256').update(normalizedQ).digest('hex');
+  // BLAKE2s-256 hex digest: deterministic, private, and the same 64-character length.
+  const hash = crypto.createHash('blake2s256').update(normalizedQ).digest('hex');
   const freshKey = `search:${hash}`;
   const staleKey = `search:${hash}:stale`;
 

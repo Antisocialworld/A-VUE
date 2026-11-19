@@ -12,7 +12,8 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
-import { assistantClient, AssistantHistoryItem } from '../api/assistantClient';
+import { assistantClient, AssistantHistoryItem, AssistantMovie } from '../api/assistantClient';
+import { AssistantMovieCard, AssistantMovieViewDetailsParams } from './AssistantMovieCard';
 
 type ChatRole = 'user' | 'assistant';
 
@@ -20,10 +21,12 @@ interface ChatMessage {
   id: string;
   role: ChatRole;
   text: string;
+  movie?: AssistantMovie;
 }
 
 export interface AssistantChatProps {
   onSessionExpired: () => void;
+  onOpenMovie?: (params: AssistantMovieViewDetailsParams) => void;
 }
 
 const MAX_MESSAGE_LENGTH = 300;
@@ -49,7 +52,7 @@ function mapAssistantError(error: unknown): string {
 }
 
 /** One shared chat implementation used by the full screen and the wide-web panel. */
-export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired }) => {
+export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, onOpenMovie }) => {
   const { colors, spacing, typography, radius } = useTheme();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -104,6 +107,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired }
         id: `m-${nextIdRef.current++}`,
         role: 'assistant',
         text: result.reply,
+        movie: result.movie,
       };
       setMessages((prev) => [...prev, assistantMessage]);
       setInput('');
@@ -159,6 +163,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired }
           >
             {item.text}
           </Text>
+          {item.movie ? (
+            <AssistantMovieCard movie={item.movie} onViewDetails={onOpenMovie} />
+          ) : null}
         </View>
       </View>
     );
