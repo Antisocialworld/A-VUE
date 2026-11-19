@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -17,14 +17,22 @@ import { AssistantMovieCard, AssistantMovieViewDetailsParams } from './Assistant
 
 type ChatRole = 'user' | 'assistant';
 
-interface ChatMessage {
+export interface ChatMessage {
   id: string;
   role: ChatRole;
   text: string;
   movie?: AssistantMovie;
 }
 
+/** Imperative handle so the host header can clear the chat's local error/thinking state. */
+export interface AssistantChatHandle {
+  clear: () => void;
+}
+
 export interface AssistantChatProps {
+  /** Controlled by MainNavigator on native/narrow; optional so the web panel keeps its own state. */
+  messages?: ChatMessage[];
+  setMessages?: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   onSessionExpired: () => void;
   onOpenMovie?: (params: AssistantMovieViewDetailsParams) => void;
 }
@@ -32,9 +40,14 @@ export interface AssistantChatProps {
 const MAX_MESSAGE_LENGTH = 300;
 
 function mapAssistantError(error: unknown): string {
-  const err = error as { status?: number; code?: string } | null | undefined;
+  const err = error as
+    | { status?: number; code?: string; name?: string; message?: string }
+    | null
+    | undefined;
   const status = typeof err?.status === 'number' ? err.status : undefined;
   const code = typeof err?.code === 'string' ? err.code : undefined;
+  const name = typeof err?.name === 'string' ? err.name : undefined;
+  const message = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
 
   if (status === 401 || code === 'UNAUTHORIZED') {
     return '';
@@ -45,22 +58,68 @@ function mapAssistantError(error: unknown): string {
   if (status === 400 || code === 'VALIDATION_ERROR') {
     return STRINGS.assistant.errors.badRequest;
   }
-  if (status === 502 || status === 503 || code === 'SERVICE_UNAVAILABLE' || code === 'BAD_GATEWAY') {
-    return STRINGS.assistant.errors.unavailable;
+  // The client turns an aborted request into a named timeout error with status 0.
+  if (
+    name === 'AbortError' ||
+    name === 'TimeoutError' ||
+    message.includes('timed out') ||
+    message.includes('timeout')
+  ) {
+    return STRINGS.assistant.errors.timeout;
   }
-  return STRINGS.assistant.errors.unavailable;
+  if (
+    status === 0 ||
+    message.includes('fetch failed') ||
+    message.includes('failed to fetch') ||
+    message.includes('network request failed') ||
+    message.includes('could not connect') ||
+    message.includes('connection refused')
+  ) {
+    return STRINGS.assistant.errors.offline;
+  }
+  if (
+    (status !== undefined && status >= 500) ||
+    code === 'SERVICE_UNAVAILABLE' ||
+    code === 'BAD_GATEWAY'
+  ) {
+    return STRINGS.assistant.errors.serviceFailure;
+  }
+  return STRINGS.assistant.errors.generic;
 }
 
 /** One shared chat implementation used by the full screen and the wide-web panel. */
-export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, onOpenMovie }) => {
+const AssistantChatView = (
+  {
+    messages: messagesProp,
+    setMessages: setMessagesProp,
+    onSessionExpired,
+    onOpenMovie,
+  }: AssistantChatProps,
+  ref: React.ForwardedRef<AssistantChatHandle>,
+) => {
   const { colors, spacing, typography, radius } = useTheme();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Web panel is deliberately left uncontrolled (web work is paused); native/narrow is controlled.
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+  const messages = messagesProp ?? localMessages;
+  const setMessages = setMessagesProp ?? setLocalMessages;
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
-  const nextIdRef = useRef(1);
+  const nextIdRef = useRef(
+    messages.reduce((max, m) => Math.max(max, Number(m.id.slice(2)) || 0), 0) + 1,
+  );
+  // Bumped by the header's Clear action: an in-flight reply from an older generation is dropped.
+  const generationRef = useRef(0);
+  useImperativeHandle(ref, () => ({
+    clear: () => {
+      generationRef.current += 1;
+      setInlineError(null);
+      setSending(false);
+      setIsTyping(false);
+    },
+  }));
 
   const suggestions = useMemo(
     () => [
@@ -84,6 +143,8 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
     if (!text || sending) return;
     if (text.length > MAX_MESSAGE_LENGTH) return;
 
+    // Snapshot the generation before awaiting: Clear invalidates it so this reply is dropped.
+    const generation = generationRef.current;
     const history: AssistantHistoryItem[] = messages.slice(-4).map((m) => ({
       role: m.role,
       text: m.text,
@@ -103,6 +164,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
 
     try {
       const result = await assistantClient.sendChat({ message: text, history });
+      if (generation !== generationRef.current) return; // cleared while in flight
       const assistantMessage: ChatMessage = {
         id: `m-${nextIdRef.current++}`,
         role: 'assistant',
@@ -113,6 +175,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
       setInput('');
       setTimeout(scrollToEnd, 50);
     } catch (error: unknown) {
+      if (generation !== generationRef.current) return; // cleared while in flight
       // Remove the failed user bubble so no unanswered turn remains in thread or next-request history.
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
       setInput((prev) => (prev.trim().length === 0 ? text : prev));
@@ -123,8 +186,11 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
       }
       setInlineError(mapAssistantError(error));
     } finally {
-      setSending(false);
-      setIsTyping(false);
+      // Do not resurrect the thinking state for a reply that was cleared (or superseded).
+      if (generation === generationRef.current) {
+        setSending(false);
+        setIsTyping(false);
+      }
     }
   };
 
@@ -151,6 +217,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
         >
           <Text
             allowFontScaling
+            selectable={Platform.OS !== 'web'}
             style={[
               styles.messageText,
               {
@@ -310,6 +377,8 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
             }}
           >
             {inlineError}
+            {' '}
+            {STRINGS.assistant.errors.messageStillInBox}
           </Text>
         ) : null}
 
@@ -337,6 +406,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
               placeholderTextColor={colors.outline}
               accessibilityLabel={STRINGS.assistant.inputLabel}
               multiline
+              autoCorrect
+              spellCheck
+              autoCapitalize="sentences"
               maxLength={MAX_MESSAGE_LENGTH}
               editable={!sending}
               style={[
@@ -396,6 +468,11 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ onSessionExpired, 
     </KeyboardAvoidingView>
   );
 };
+
+/** Ref allows the host header to reset local chat state without lifting it into the navigator. */
+export const AssistantChat = React.forwardRef<AssistantChatHandle, AssistantChatProps>(
+  AssistantChatView,
+);
 
 const styles = StyleSheet.create({
   container: {

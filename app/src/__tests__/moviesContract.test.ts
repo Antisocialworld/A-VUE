@@ -158,9 +158,25 @@ describe('MoviesHomeScreen & MovieDetailScreen TMDB Attribution (Task B)', () =>
     );
   });
 
-  it('TMDB logo has an accessibility label and role', () => {
+  it('TMDB logo has an accessibility label and role from the strings file', () => {
     expect(attributionSource).toContain('accessibilityRole="image"');
-    expect(attributionSource).toContain('accessibilityLabel="TMDB logo"');
+    expect(attributionSource).toContain(
+      'accessibilityLabel={STRINGS.movies.tmdbLogoAccessibilityLabel}',
+    );
+    expect(STRINGS.movies.tmdbLogoAccessibilityLabel).toBe('TMDB logo');
+  });
+
+  it('TmdbAttribution has no hardcoded user-facing text or raw numeric padding', () => {
+    // The mandatory wording and logo label live only in STRINGS.
+    expect(attributionSource).not.toMatch(/accessibilityLabel=["'][^"']+["']/);
+    expect(attributionSource).not.toMatch(/>\s*[A-Z][a-z]+(\s+[A-Za-z]+)+\s*</);
+    expect(attributionSource).toContain('{STRINGS.movies.tmdbAttribution}');
+    expect(attributionSource).toContain('{STRINGS.movies.tmdbLogoAccessibilityLabel}');
+
+    // Spacing comes from the theme token, with no raw padding values left in styles.
+    expect(attributionSource).toContain('paddingHorizontal: spacing.base');
+    expect(attributionSource).not.toMatch(/\bpadding(?:Horizontal|Vertical|Top|Bottom|Left|Right|End|Start)?:\s*\d+/);
+    expect(attributionSource).not.toContain('padding: 16');
   });
 
   it('sizes TMDB logo dynamically from Image.resolveAssetSource with height 24 pt and real aspect ratio', () => {

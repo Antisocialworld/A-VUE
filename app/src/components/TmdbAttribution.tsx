@@ -49,12 +49,12 @@ export const TmdbAttribution: React.FC<TmdbAttributionProps> = ({
       testID={testID || 'tmdb-attribution'}
       accessible={true}
       accessibilityRole="none"
-      style={[styles.container, style]}
+      style={[styles.container, style, { paddingHorizontal: spacing.base }]}
     >
       <Image
         source={tmdbLogoSource}
         accessibilityRole="image"
-        accessibilityLabel="TMDB logo"
+        accessibilityLabel={STRINGS.movies.tmdbLogoAccessibilityLabel}
         resizeMode="contain"
         style={styles.logo}
       />
@@ -82,7 +82,6 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
   },
   logo: {
     height: TMDB_LOGO_HEIGHT,

@@ -77,8 +77,9 @@ export class AssistantClient {
     }
 
     const controller = new AbortController();
-    // Must outlast server-side attempts (max 15s primary + capped fallback, total <= 24s).
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    // Must outlast the server worst case: 15 s primary (env max) + 10 s fallback (clamp
+    // floor) = 25 s. 27 s leaves a 2 s margin.
+    const timeout = setTimeout(() => controller.abort(), 27000);
 
     try {
       const response = await fetch(url, {
@@ -109,7 +110,7 @@ export class AssistantClient {
       return data as T;
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        const timeoutError = new Error('Request timed out. Please check your connection.') as any;
+        const timeoutError = new Error(STRINGS.errors.requestTimeout) as any;
         timeoutError.name = 'AbortError';
         timeoutError.status = 0;
         throw timeoutError;

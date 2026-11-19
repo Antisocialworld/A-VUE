@@ -1,10 +1,12 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { moviesClient } from '../api/moviesClient';
 import type { AssistantMovie } from '../api/assistantClient';
 import { TmdbAttribution } from './TmdbAttribution';
+import { Toast } from './Toast';
 
 export type AssistantMovieViewDetailsParams = {
   movieId: number;
@@ -27,8 +29,39 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
   testID,
 }) => {
   const { colors, spacing, typography, radius } = useTheme();
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const posterUrl = moviesClient.getPosterUrl('w342', movie.posterPath);
   const releaseYear = movie.year ?? STRINGS.movies.tba;
+
+  const copyPosterImage = async () => {
+    if (!posterUrl) return;
+    try {
+      // The poster URL is the app's own proxy route, never an upstream host.
+      const response = await fetch(posterUrl);
+      if (!response.ok) throw new Error('poster request failed');
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result ?? '');
+          resolve(dataUrl.slice(dataUrl.indexOf(',') + 1));
+        };
+        reader.onerror = () => reject(new Error('poster read failed'));
+        reader.readAsDataURL(blob);
+      });
+      await Clipboard.setImageAsync(base64);
+      setToastMessage(STRINGS.assistant.movie.copyImageSuccess);
+    } catch {
+      setToastMessage(STRINGS.assistant.movie.copyImageFailure);
+    }
+  };
+
+  const handlePosterLongPress = () => {
+    Alert.alert(STRINGS.assistant.movie.copyImageTitle, undefined, [
+      { text: STRINGS.assistant.movie.copyImageCancel, style: 'cancel' },
+      { text: STRINGS.assistant.movie.copyImage, onPress: () => void copyPosterImage() },
+    ]);
+  };
 
   const handleViewDetails = () => {
     onViewDetails?.({
@@ -42,9 +75,6 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
   return (
     <View
       testID={testID}
-      accessible
-      accessibilityRole="none"
-      accessibilityLabel={STRINGS.assistant.movie.cardAccessibilityLabel(movie.title)}
       style={[
         styles.card,
         {
@@ -56,7 +86,13 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
       ]}
     >
       <View style={[styles.contentRow, { gap: spacing.sm }]}>
-        <View
+        <Pressable
+          accessibilityRole="image"
+          accessibilityLabel={STRINGS.assistant.movie.posterAccessibilityLabel(movie.title)}
+          accessibilityHint={
+            Platform.OS !== 'web' ? STRINGS.assistant.movie.posterLongPressHint : undefined
+          }
+          onLongPress={Platform.OS !== 'web' ? handlePosterLongPress : undefined}
           style={[
             styles.posterContainer,
             {
@@ -68,7 +104,7 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
           {posterUrl ? (
             <Image
               source={{ uri: posterUrl }}
-              accessibilityRole="image"
+              accessible={false}
               accessibilityLabel={STRINGS.assistant.movie.posterAccessibilityLabel(movie.title)}
               resizeMode="cover"
               style={[styles.poster, { borderRadius: radius.sm }]}
@@ -77,6 +113,7 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
             <View style={[styles.posterFallback, { padding: spacing.sm }]}>
               <Text
                 allowFontScaling
+                selectable={Platform.OS !== 'web'}
                 accessibilityRole="text"
                 accessibilityLabel={STRINGS.assistant.movie.titleAccessibilityLabel(movie.title)}
                 numberOfLines={3}
@@ -94,11 +131,12 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
               </Text>
             </View>
           )}
-        </View>
+        </Pressable>
 
-        <View style={[styles.details, { gap: spacing.xs }]}>
+        <View style={[styles.details, { gap: spacing.sm }]}>
           <Text
             allowFontScaling
+            selectable={Platform.OS !== 'web'}
             accessibilityRole="text"
             accessibilityLabel={STRINGS.assistant.movie.titleAccessibilityLabel(movie.title)}
             numberOfLines={2}
@@ -118,6 +156,7 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
 
           <Text
             allowFontScaling
+            selectable={Platform.OS !== 'web'}
             accessibilityRole="text"
             accessibilityLabel={STRINGS.assistant.movie.yearAccessibilityLabel(releaseYear)}
             style={[
@@ -135,6 +174,7 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
 
           <Text
             allowFontScaling
+            selectable={Platform.OS !== 'web'}
             accessibilityRole="text"
             accessibilityLabel={STRINGS.assistant.movie.overviewAccessibilityLabel(movie.title)}
             numberOfLines={4}
@@ -185,7 +225,10 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
         </View>
       </View>
 
-      <TmdbAttribution />
+      <View style={{ marginTop: spacing.sm }}>
+        <TmdbAttribution />
+      </View>
+      <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </View>
   );
 };

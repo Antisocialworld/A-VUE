@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
+  AssistantMovieCard,
   Button,
   CodeInput,
   EmptyState,
@@ -286,6 +287,21 @@ export const ComponentGalleryScreen: React.FC<ComponentGalleryScreenProps> = ({ 
       <View style={{ width: '100%', borderWidth: 1, borderColor: colors.outline_variant, borderRadius: radius.md, overflow: 'hidden' }}>
         <MoviesEmptyState onRetry={() => {}} />
       </View>
+
+      {/* ---------------- 9. ASSISTANT MOVIE CARD ---------------- */}
+      {renderSectionHeader(STRINGS.gallery.assistantMovieCardSection)}
+
+      {renderStateLabel(STRINGS.gallery.assistantMovieCardSample)}
+      <AssistantMovieCard
+        movie={{
+          tmdbId: 123,
+          title: STRINGS.gallery.assistantMovieSampleTitle,
+          year: STRINGS.gallery.assistantMovieSampleYear,
+          overview: STRINGS.gallery.assistantMovieSampleOverview,
+          posterPath: STRINGS.gallery.assistantMovieSamplePosterPath,
+        }}
+        onViewDetails={() => {}}
+      />
 
       {renderSectionHeader('Seat Map & QR Components')}
       {renderStateLabel('Interactive Seat Map')}

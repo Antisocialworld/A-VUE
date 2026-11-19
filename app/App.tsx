@@ -8,7 +8,7 @@ import { SignInScreen } from './src/screens/SignInScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen';
 import { ComponentGalleryScreen } from './src/screens/ComponentGalleryScreen';
-import { MoviesHomeScreen } from './src/screens/MoviesHomeScreen';
+import { MoviesHomeScreen, type MovieSelectHandler } from './src/screens/MoviesHomeScreen';
 import { MovieDetailScreen } from './src/screens/MovieDetailScreen';
 import { ShowtimesScreen } from './src/screens/ShowtimesScreen';
 import { SeatMapScreen } from './src/screens/SeatMapScreen';
@@ -18,7 +18,14 @@ import { TicketScreen } from './src/screens/TicketScreen';
 import { MyTicketsScreen } from './src/screens/MyTicketsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
 import { AskAssistantScreen } from './src/screens/AskAssistantScreen';
-import { AssistantPanel, Button, PhotoFade, WebColumn } from './src/components';
+import {
+  AssistantPanel,
+  Button,
+  PhotoFade,
+  WebColumn,
+  type AssistantMovieViewDetailsParams,
+  type ChatMessage,
+} from './src/components';
 import { STRINGS, formatDeletableDate } from './src/constants/strings';
 import { authClient, AuthSession, ScheduledForDeletionInfo } from './src/api/authClient';
 import { cinemaClient } from './src/api/cinemaClient';
@@ -60,6 +67,11 @@ const MainNavigator: React.FC = () => {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [assistantPanelOpen, setAssistantPanelOpen] = useState<boolean>(false);
+  // In-memory chat history lives here so Movie Detail can unmount the chat without losing it.
+  const [assistantMessages, setAssistantMessages] = useState<ChatMessage[]>([]);
+  const [movieDetailReturnRoute, setMovieDetailReturnRoute] = useState<'movies' | 'ask_assistant'>(
+    'movies',
+  );
   const { width: windowWidth } = useWindowDimensions();
   const useAssistantPanel = shouldUseAssistantPanel(Platform.OS, windowWidth);
 
@@ -86,6 +98,8 @@ const MainNavigator: React.FC = () => {
     } catch {
       // Ignore cleanup error
     } finally {
+      setAssistantMessages([]);
+      setMovieDetailReturnRoute('movies');
       setActiveSession(null);
       setCurrentRoute('welcome');
     }
@@ -136,8 +150,42 @@ const MainNavigator: React.FC = () => {
 
   const handleAssistantSessionExpired = () => {
     setAssistantPanelOpen(false);
+    setAssistantMessages([]);
+    setMovieDetailReturnRoute('movies');
     setActiveSession(null);
     setCurrentRoute('sign_in');
+  };
+
+  // One Movie Detail path shared by Movies, Search and the assistant movie card.
+  const handleSelectMovie: MovieSelectHandler = (
+    movieOrId,
+    movieTitle,
+    posterUrl,
+    releaseYear,
+    voteAverage,
+  ) => {
+    // Movies and Search always return to Movies; only the chat-card wrapper changes this.
+    setMovieDetailReturnRoute('movies');
+    if (typeof movieOrId === 'object' && movieOrId !== null) {
+      setSelectedMovieId(movieOrId.movieId);
+      setSelectedMovieTitle(movieOrId.movieTitle || '');
+      setSelectedMoviePosterUrl(movieOrId.posterUrl);
+      setSelectedMovieReleaseYear(movieOrId.releaseYear);
+      setSelectedMovieVoteAverage(movieOrId.voteAverage);
+    } else {
+      setSelectedMovieId(movieOrId);
+      if (movieTitle) setSelectedMovieTitle(movieTitle);
+      setSelectedMoviePosterUrl(posterUrl);
+      setSelectedMovieReleaseYear(releaseYear);
+      setSelectedMovieVoteAverage(voteAverage);
+    }
+    setCurrentRoute('movie_detail');
+  };
+
+  // Native/narrow chat card: return to the chat on Back. The wide-web overlay is unchanged.
+  const handleOpenAssistantMovie = (params: AssistantMovieViewDetailsParams) => {
+    handleSelectMovie(params);
+    if (!useAssistantPanel) setMovieDetailReturnRoute('ask_assistant');
   };
 
   // Any authenticated client's 401 reuses this exact session-expired flow.
@@ -187,22 +235,7 @@ const MainNavigator: React.FC = () => {
         onSignOut={handleSignOut}
         onOpenSearch={() => setCurrentRoute('search')}
         onOpenAssistant={openAssistant}
-        onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
-          if (typeof movieOrId === 'object' && movieOrId !== null) {
-            setSelectedMovieId(movieOrId.movieId);
-            setSelectedMovieTitle(movieOrId.movieTitle || '');
-            setSelectedMoviePosterUrl(movieOrId.posterUrl);
-            setSelectedMovieReleaseYear(movieOrId.releaseYear);
-            setSelectedMovieVoteAverage(movieOrId.voteAverage);
-          } else {
-            setSelectedMovieId(movieOrId);
-            if (movieTitle) setSelectedMovieTitle(movieTitle);
-            setSelectedMoviePosterUrl(posterUrl);
-            setSelectedMovieReleaseYear(releaseYear);
-            setSelectedMovieVoteAverage(voteAverage);
-          }
-          setCurrentRoute('movie_detail');
-        }}
+        onSelectMovie={handleSelectMovie}
         onNavigateToTickets={() => setCurrentRoute('my_tickets')}
       />
     );
@@ -212,22 +245,7 @@ const MainNavigator: React.FC = () => {
     return (
       <SearchScreen
         onBack={() => setCurrentRoute('movies')}
-        onSelectMovie={(movieOrId, movieTitle, posterUrl, releaseYear, voteAverage) => {
-          if (typeof movieOrId === 'object' && movieOrId !== null) {
-            setSelectedMovieId(movieOrId.movieId);
-            setSelectedMovieTitle(movieOrId.movieTitle || '');
-            setSelectedMoviePosterUrl(movieOrId.posterUrl);
-            setSelectedMovieReleaseYear(movieOrId.releaseYear);
-            setSelectedMovieVoteAverage(movieOrId.voteAverage);
-          } else {
-            setSelectedMovieId(movieOrId);
-            if (movieTitle) setSelectedMovieTitle(movieTitle);
-            setSelectedMoviePosterUrl(posterUrl);
-            setSelectedMovieReleaseYear(releaseYear);
-            setSelectedMovieVoteAverage(voteAverage);
-          }
-          setCurrentRoute('movie_detail');
-        }}
+        onSelectMovie={handleSelectMovie}
       />
     );
   }
@@ -237,6 +255,9 @@ const MainNavigator: React.FC = () => {
       <AskAssistantScreen
         onBack={() => setCurrentRoute('movies')}
         onSessionExpired={handleAssistantSessionExpired}
+        messages={assistantMessages}
+        setMessages={setAssistantMessages}
+        onOpenMovie={handleOpenAssistantMovie}
       />,
     );
   }
@@ -246,12 +267,14 @@ const MainNavigator: React.FC = () => {
       <MovieDetailScreen
         movieId={selectedMovieId}
         onBack={() => {
+          const returnRoute = movieDetailReturnRoute;
+          setMovieDetailReturnRoute('movies');
           setSelectedMovieId(null);
           setSelectedMovieTitle('');
           setSelectedMoviePosterUrl(undefined);
           setSelectedMovieReleaseYear(undefined);
           setSelectedMovieVoteAverage(undefined);
-          setCurrentRoute('movies');
+          setCurrentRoute(returnRoute);
         }}
         onGetTickets={(id, title) => {
           setSelectedMovieId(id);
@@ -390,6 +413,7 @@ const MainNavigator: React.FC = () => {
         <AssistantPanel
           onClose={() => setAssistantPanelOpen(false)}
           onSessionExpired={handleAssistantSessionExpired}
+          onOpenMovie={handleSelectMovie}
         />
       ) : null}
 

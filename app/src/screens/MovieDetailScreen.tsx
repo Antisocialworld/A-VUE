@@ -209,22 +209,26 @@ export const MovieDetailScreen: React.FC<MovieDetailScreenProps> = ({
                   </>
                 )}
 
-                <Text style={[styles.metaDot, { color: colors.on_surface_variant }]}>•</Text>
-                <Text
-                  allowFontScaling
-                  style={[
-                    styles.ratingText,
-                    {
-                      color: colors.primary,
-                      fontFamily: typography.labelMedium.fontFamily,
-                      fontSize: typography.labelMedium.fontSize,
-                      fontWeight: '700',
-                      lineHeight: typography.labelMedium.lineHeight,
-                    },
-                  ]}
-                >
-                  ★ {movie.voteAverage.toFixed(1)}/10
-                </Text>
+                {typeof movie.voteAverage === 'number' && Number.isFinite(movie.voteAverage) && (
+                  <>
+                    <Text style={[styles.metaDot, { color: colors.on_surface_variant }]}>•</Text>
+                    <Text
+                      allowFontScaling
+                      style={[
+                        styles.ratingText,
+                        {
+                          color: colors.primary,
+                          fontFamily: typography.labelMedium.fontFamily,
+                          fontSize: typography.labelMedium.fontSize,
+                          fontWeight: '700',
+                          lineHeight: typography.labelMedium.lineHeight,
+                        },
+                      ]}
+                    >
+                      ★ {movie.voteAverage.toFixed(1)}/10
+                    </Text>
+                  </>
+                )}
               </View>
             </View>
 

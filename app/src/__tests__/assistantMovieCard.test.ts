@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseAssistantChatResponse } from '../api/assistantClient';
 import { STRINGS } from '../constants/strings';
 
 const appRoot = path.resolve(__dirname, '..');
 const appEntry = path.resolve(__dirname, '../../App.tsx');
+const appSrc = fs.readFileSync(appEntry, 'utf-8');
 const cardPath = path.join(appRoot, 'components/AssistantMovieCard.tsx');
 const chatPath = path.join(appRoot, 'components/AssistantChat.tsx');
 const cardSrc = fs.readFileSync(cardPath, 'utf-8');
@@ -114,5 +115,78 @@ describe('Ask A VUE movie card', () => {
     expect(chatSrc).toContain('movie: result.movie');
     expect(chatSrc).toContain('<AssistantMovieCard movie={item.movie} onViewDetails={onOpenMovie} />');
     expect(chatSrc).toContain('text: m.text');
+  });
+
+  it('calls onOpenMovie with the card tmdbId when View details is tapped', () => {
+    const handler = cardSrc.match(/const handleViewDetails = \(\) => \{([\s\S]*?)\n  \};/);
+    expect(handler).not.toBeNull();
+    const onViewDetails = vi.fn();
+    // Execute the card's own tap handler body with mocked values: no renderer needed.
+    new Function('onViewDetails', 'movie', 'posterUrl', 'releaseYear', handler![1])(
+      onViewDetails,
+      validMovie,
+      '/poster.jpg',
+      validMovie.year,
+    );
+    expect(onViewDetails).toHaveBeenCalledTimes(1);
+    expect(onViewDetails).toHaveBeenCalledWith({
+      movieId: validMovie.tmdbId,
+      movieTitle: validMovie.title,
+      posterUrl: '/poster.jpg',
+      releaseYear: validMovie.year,
+    });
+  });
+
+  it('wires the card handler to the one existing Movie Detail handler', () => {
+    expect(appSrc).toContain('const handleSelectMovie: MovieSelectHandler');
+    expect(appSrc).toContain('onSelectMovie={handleSelectMovie}');
+    expect(appSrc).toContain('onOpenMovie={handleSelectMovie}');
+    expect(fs.readFileSync(path.resolve(__dirname, '../screens/AskAssistantScreen.tsx'), 'utf-8')).toContain(
+      'onOpenMovie={onOpenMovie}',
+    );
+    expect(fs.readFileSync(path.resolve(__dirname, '../components/AssistantPanel.tsx'), 'utf-8')).toContain(
+      'onOpenMovie={onOpenMovie}',
+    );
+  });
+
+  it('imports expo-clipboard only in the assistant movie card', () => {
+    const sources = [...productionSources(appRoot)];
+    if (fs.existsSync(appEntry)) sources.push(appEntry);
+    const importers = sources.filter((source) =>
+      /from ['"]expo-clipboard['"]/.test(fs.readFileSync(source, 'utf-8')),
+    );
+    expect(importers).toEqual([cardPath]);
+    expect(cardSrc).toContain("import * as Clipboard from 'expo-clipboard';");
+  });
+
+  it('guards the poster long-press copy behind the native platform check', () => {
+    expect(cardSrc).toContain(
+      "onLongPress={Platform.OS !== 'web' ? handlePosterLongPress : undefined}",
+    );
+    expect(cardSrc).toContain('accessibilityHint={');
+    expect(cardSrc).toContain('Clipboard.setImageAsync(base64)');
+    expect(cardSrc).toContain("moviesClient.getPosterUrl('w342', movie.posterPath)");
+  });
+
+  it('keeps every new copy-image label in STRINGS', () => {
+    const newStrings: Array<[keyof typeof STRINGS.assistant.movie, string]> = [
+      ['posterLongPressHint', 'Long press the poster to copy it.'],
+      ['copyImageTitle', 'Poster options'],
+      ['copyImage', 'Copy image'],
+      ['copyImageCancel', 'Cancel'],
+      ['copyImageSuccess', 'Poster copied.'],
+      ['copyImageFailure', 'The poster could not be copied. Try again.'],
+    ];
+    for (const [key, literal] of newStrings) {
+      expect(STRINGS.assistant.movie[key]).toBe(literal);
+      expect(cardSrc).toContain(`STRINGS.assistant.movie.${key}`);
+      expect(cardSrc).not.toContain(`'${literal}'`);
+    }
+  });
+
+  it('keeps View details and the attribution block while avoiding a direct TMDB host', () => {
+    expect(cardSrc).toContain('{STRINGS.assistant.movie.viewDetails}');
+    expect(cardSrc).toContain('<TmdbAttribution />');
+    expect(cardSrc).not.toContain(tmdbHost);
   });
 });

@@ -91,7 +91,7 @@ export class MoviesClient {
       return data as T;
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        const timeoutError = new Error('Request timed out. Please check your connection.') as any;
+        const timeoutError = new Error(STRINGS.errors.requestTimeout) as any;
         timeoutError.name = 'AbortError';
         timeoutError.status = 0;
         throw timeoutError;

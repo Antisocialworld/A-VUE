@@ -72,7 +72,7 @@ export const ScreenShell: React.FC<ScreenShellProps> = ({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={STRINGS.common.back}
-              accessibilityHint="Navigates back to the previous screen"
+              accessibilityHint={STRINGS.common.backHint}
               onPress={onBack}
               style={[
                 styles.backButton,

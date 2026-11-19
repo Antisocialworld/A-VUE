@@ -51,6 +51,7 @@ export const STRINGS = {
 
   common: {
     back: 'Back',
+    backHint: 'Navigates back to the previous screen',
     close: 'Close',
     loading: 'Loading…',
     retry: 'Retry',
@@ -70,6 +71,7 @@ export const STRINGS = {
     genericTitle: 'Something went wrong',
     genericBody: 'Please try again.',
     tryAgain: 'Try again',
+    requestTimeout: 'Request timed out. Please check your connection.',
   },
 
   welcome: {
@@ -182,6 +184,7 @@ export const STRINGS = {
     loadingMore: 'Loading more movies…',
     tmdbAttribution:
       'This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.',
+    tmdbLogoAccessibilityLabel: 'TMDB logo',
     posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
     cardAccessibilityLabel: (title: string, year: string, rating: number) =>
       `${title}, ${year}, rated ${rating} out of 10`,
@@ -372,6 +375,13 @@ export const STRINGS = {
     secondaryButton: 'Secondary Button',
     textButton: 'Text Button',
     backToAuth: 'Back to Auth',
+    assistantMovieCardSection: 'Assistant Movie Card',
+    assistantMovieCardSample: 'AssistantMovieCard — Movie result sample',
+    assistantMovieSampleTitle: 'Brand New Day',
+    assistantMovieSampleYear: '2026',
+    assistantMovieSampleOverview:
+      'A sample overview shown in a chat movie result card, with the mandatory TMDB attribution below.',
+    assistantMovieSamplePosterPath: 'pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg',
   },
 
   assistant: {
@@ -385,13 +395,20 @@ export const STRINGS = {
     inputPlaceholder: 'Ask a question',
     inputLabel: 'Message',
     sendAction: 'Send message',
+    clearAction: 'Clear chat',
+    clearActionAccessibilityLabel: 'Clear chat',
     typing: 'Typing...',
     fabAccessibilityLabel: 'Ask A VUE assistant',
     movie: {
       viewDetails: 'View details',
       viewDetailsAccessibilityLabel: (title: string) => `View details for ${title}`,
       posterAccessibilityLabel: (title: string) => `Poster for ${title}`,
-      cardAccessibilityLabel: (title: string) => `Movie details for ${title}`,
+      posterLongPressHint: 'Long press the poster to copy it.',
+      copyImageTitle: 'Poster options',
+      copyImage: 'Copy image',
+      copyImageCancel: 'Cancel',
+      copyImageSuccess: 'Poster copied.',
+      copyImageFailure: 'The poster could not be copied. Try again.',
       titleAccessibilityLabel: (title: string) => `Movie title: ${title}`,
       yearAccessibilityLabel: (year: string) => `Release year: ${year}`,
       overviewAccessibilityLabel: (title: string) => `Overview for ${title}`,
@@ -400,6 +417,11 @@ export const STRINGS = {
       tooMany: 'Ask A VUE is busy right now. Try again shortly.',
       badRequest: 'That message could not be sent.',
       unavailable: 'The assistant is unavailable right now. Try again later.',
+      offline: 'You appear to be offline. Check your connection, then try again.',
+      timeout: 'That took too long to reply. Try again.',
+      serviceFailure: 'The assistant could not reply right now. Try again later.',
+      generic: 'That message could not be sent. Try again.',
+      messageStillInBox: 'Your message is still in the box.',
     },
   },
 } as const;

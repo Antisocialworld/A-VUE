@@ -3,15 +3,21 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { STRINGS } from '../constants/strings';
 import { AssistantChat } from './AssistantChat';
+import type { AssistantMovieViewDetailsParams } from './AssistantMovieCard';
 import { ASSISTANT_PANEL_WIDTH } from '../utils/assistantLayout';
 
 export interface AssistantPanelProps {
   onClose: () => void;
   onSessionExpired: () => void;
+  onOpenMovie?: (params: AssistantMovieViewDetailsParams) => void;
 }
 
 /** Wide-web overlay: a right-side panel with the page still visible behind it. */
-export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, onSessionExpired }) => {
+export const AssistantPanel: React.FC<AssistantPanelProps> = ({
+  onClose,
+  onSessionExpired,
+  onOpenMovie,
+}) => {
   const { colors, spacing, typography, radius, shadows } = useTheme();
 
   return (
@@ -87,7 +93,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, onSessi
           </Pressable>
         </View>
 
-        <AssistantChat onSessionExpired={onSessionExpired} />
+        <AssistantChat onSessionExpired={onSessionExpired} onOpenMovie={onOpenMovie} />
       </View>
     </View>
   );
