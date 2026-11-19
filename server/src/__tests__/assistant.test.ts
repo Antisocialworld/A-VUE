@@ -833,3 +833,268 @@ describe('.env.example assistant entries', () => {
     expect(content).toContain('EMBEDDING_DIMENSIONS=768');
   });
 });
+
+describe('Ask A VUE movie lookup route', () => {
+  const mockSearchMovies = vi.fn();
+
+  function makeMovie(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 550,
+      title: 'Fight Club',
+      overview: `${'word '.repeat(80)}tail`,
+      releaseDate: '1999-10-15',
+      runtimeMinutes: 139,
+      genres: ['Drama'],
+      voteAverage: 8.4,
+      posterPath: '/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg',
+      backdropPath: '/backdrop.jpg',
+      ...overrides,
+    };
+  }
+
+  function captureInfo(server: Awaited<ReturnType<typeof buildTestServer>>) {
+    const calls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req: any, _reply: any, done: any) => {
+      const orig = req.log.info.bind(req.log);
+      req.log.info = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        calls.push([obj, msg]);
+        return (orig as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+    return calls;
+  }
+
+  beforeEach(() => {
+    mockSearchMovies.mockReset();
+    mockSearchMovies.mockResolvedValue({ movies: [], totalResults: 0, stale: false });
+    vi.doMock('../lib/search.js', async () => {
+      const actual = await vi.importActual<any>('../lib/search.js');
+      return {
+        ...actual,
+        searchMovies: (...args: unknown[]) => mockSearchMovies(...args),
+      };
+    });
+  });
+
+  it('returns the movie field on a match with no Gemini call, even when Gemini is unconfigured', async () => {
+    mockSearchMovies.mockResolvedValueOnce({
+      movies: [makeMovie({ title: 'Spider-Man: Brand New Day', releaseDate: '2026-01-01' })],
+      totalResults: 1,
+      stale: false,
+    });
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Can I see Spider-Man: Brand New Day poster?' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      reply: 'Here is what I found.',
+      movie: {
+        tmdbId: 550,
+        title: 'Spider-Man: Brand New Day',
+        year: '2026',
+        posterPath: 'pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg',
+      },
+    });
+    expect((res.json() as any).movie.overview.length).toBeLessThanOrEqual(300);
+    expect(mockSearchMovies).toHaveBeenCalledWith('spider man brand new day');
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('returns fixed not-found text for strong intent with no match and no model call', async () => {
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'show me the poster of Dune' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      reply: "I couldn't find that movie. Try the Search screen in A VUE.",
+    });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('falls through to the model for weak intent with no match', async () => {
+    const server = await buildTestServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'what does Lord of the Rings look like' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Hello from A VUE.' });
+    expect(mockSearchMovies).toHaveBeenCalledWith('lord of the rings');
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect(mockGenerate.mock.calls[0][0].message).toBe('what does Lord of the Rings look like');
+    await server.close();
+  });
+
+  it('falls through to the model for weak intent on search error', async () => {
+    mockSearchMovies.mockRejectedValueOnce(new Error('SEARCH_UNAVAILABLE'));
+    const server = await buildTestServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'what does Dune look like' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Hello from A VUE.' });
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect(mockGenerate.mock.calls[0][0].message).toBe('what does Dune look like');
+    await server.close();
+  });
+
+  it('returns fixed unavailable text for strong intent on search error with no model call', async () => {
+    mockSearchMovies.mockRejectedValueOnce(new Error('SEARCH_UNAVAILABLE'));
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'show me Dune poster' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      reply: 'Movie details are unavailable right now. Try again shortly.',
+    });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(JSON.stringify(res.json())).not.toContain('SEARCH_UNAVAILABLE');
+    await server.close();
+  });
+
+  it('stops ticket questions at the facts gate before search or model', async () => {
+    const server = await buildTestServer();
+    const { FACTS_REFUSAL_TEXT } = await import('../lib/assistant/factsGate.js');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Show me my tickets' },
+    });
+
+    expect(res.json()).toEqual({ reply: FACTS_REFUSAL_TEXT });
+    expect(mockSearchMovies).not.toHaveBeenCalled();
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('logs only verdict and latency for lookup outcomes', async () => {
+    mockSearchMovies
+      .mockResolvedValueOnce({ movies: [makeMovie()], totalResults: 1, stale: false })
+      .mockResolvedValueOnce({ movies: [], totalResults: 0, stale: false })
+      .mockRejectedValueOnce(new Error('SEARCH_UNAVAILABLE'));
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const infoCalls = captureInfo(server);
+
+    for (let i = 0; i < 3; i += 1) {
+      await server.inject({
+        method: 'POST',
+        url: '/assistant/chat',
+        payload: { message: 'show me Dune poster' },
+      });
+    }
+
+    const lookupLogs = infoCalls.filter((call) => call[1] === 'assistant_movie_lookup');
+    expect(lookupLogs.map((call) => (call[0] as any).verdict)).toEqual([
+      'movie-match',
+      'movie-none',
+      'movie-error',
+    ]);
+    for (const call of lookupLogs) {
+      expect(Object.keys(call[0] as object).sort()).toEqual(['latencyMs', 'verdict']);
+      expect((call[0] as any).latencyMs).toEqual(expect.any(Number));
+    }
+    expect(JSON.stringify(lookupLogs)).not.toContain('Dune');
+    expect(JSON.stringify(lookupLogs)).not.toContain('SEARCH_UNAVAILABLE');
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('rejects a low-score weak match and falls through to the model', async () => {
+    mockSearchMovies.mockResolvedValueOnce({
+      movies: [makeMovie({ id: 858, title: 'The Lion King' })],
+      totalResults: 1,
+      stale: false,
+    });
+    const server = await buildTestServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'what does Dune look like' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ reply: 'Hello from A VUE.' });
+    expect(mockSearchMovies).toHaveBeenCalledWith('dune');
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    await server.close();
+  });
+
+  it('returns the movie for a weak exact title match without a Gemini call', async () => {
+    mockSearchMovies.mockResolvedValueOnce({
+      movies: [makeMovie({ id: 438, title: 'Dune', releaseDate: '2021-10-01' })],
+      totalResults: 1,
+      stale: false,
+    });
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'tell me about Dune' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      reply: 'Here is what I found.',
+      movie: { title: 'Dune', year: '2021' },
+    });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('never searches for generic stoplist titles', async () => {
+    const server = await buildTestServer();
+    const messages = [
+      'Tell me about the cinema',
+      'Tell me about A VUE',
+      'Tell me about the app',
+      'Tell me about you',
+      'Tell me about yourself',
+      'Tell me about it',
+      'Tell me about this',
+      'Tell me about that',
+      'Tell me about movies',
+      'Tell me about films',
+      'Tell me about tickets',
+    ];
+
+    for (const message of messages) {
+      mockSearchMovies.mockClear();
+      const res = await server.inject({
+        method: 'POST',
+        url: '/assistant/chat',
+        payload: { message },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(mockSearchMovies).not.toHaveBeenCalled();
+    }
+    await server.close();
+  });
+
+  it('scores weak matches with the real search helper', () => {
+    const routeSrc = fs.readFileSync(path.resolve(__dirname, '../routes/assistant.ts'), 'utf-8');
+    expect(routeSrc).toContain('calculateSearchScore, normalizeSearchText, searchMovies');
+    expect(routeSrc).toContain(
+      'calculateSearchScore(title, movie.title) >= WEAK_MATCH_MIN_SCORE',
+    );
+  });
+});

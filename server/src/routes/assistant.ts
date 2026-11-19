@@ -13,6 +13,17 @@ import {
 } from '../lib/assistant/model.js';
 import { checkScope, normaliseBrand, SCOPE_REFUSAL_TEXT } from '../lib/assistant/scopeGuard.js';
 import { checkFacts, FACTS_REFUSAL_TEXT } from '../lib/assistant/factsGate.js';
+import { calculateSearchScore, normalizeSearchText, searchMovies } from '../lib/search.js';
+import {
+  MOVIE_FOUND_TEXT,
+  MOVIE_NOT_FOUND_TEXT,
+  MOVIE_UNAVAILABLE_TEXT,
+  WEAK_MATCH_MIN_SCORE,
+  detectMovieIntent,
+  extractMovieTitle,
+  isSearchableMovieTitle,
+  toMovieSummary,
+} from '../lib/assistant/movieLookup.js';
 
 // Friendly 429 copy, shared by every rate-limit response on this route.
 const ASSISTANT_BUSY_MESSAGE = 'Ask A VUE is busy right now. Try again shortly.';
@@ -80,6 +91,45 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
     request.log.info({ verdict: facts.kind }, 'assistant_facts_verdict');
     if (facts.kind === 'needs-facts') {
       return reply.status(200).send({ reply: FACTS_REFUSAL_TEXT });
+    }
+
+    const intent = detectMovieIntent(parsed.data.message);
+    if (intent !== 'none') {
+      const title = extractMovieTitle(parsed.data.message);
+      if (title && isSearchableMovieTitle(title)) {
+        const movieLookupStartedAt = Date.now();
+        const logMovieLookup = (verdict: 'movie-match' | 'movie-none' | 'movie-error') => {
+          request.log.info(
+            { verdict, latencyMs: Date.now() - movieLookupStartedAt },
+            'assistant_movie_lookup',
+          );
+        };
+
+        try {
+          const searchResult = await searchMovies(normalizeSearchText(title));
+          const movie = searchResult.movies[0];
+          if (
+            movie &&
+            (intent === 'strong' ||
+              calculateSearchScore(title, movie.title) >= WEAK_MATCH_MIN_SCORE)
+          ) {
+            logMovieLookup('movie-match');
+            return reply.status(200).send({
+              reply: MOVIE_FOUND_TEXT,
+              movie: toMovieSummary(movie),
+            });
+          }
+          logMovieLookup('movie-none');
+          if (intent === 'strong') {
+            return reply.status(200).send({ reply: MOVIE_NOT_FOUND_TEXT });
+          }
+        } catch {
+          logMovieLookup('movie-error');
+          if (intent === 'strong') {
+            return reply.status(200).send({ reply: MOVIE_UNAVAILABLE_TEXT });
+          }
+        }
+      }
     }
 
     if (!env.GEMINI_API_KEY || !env.GEMINI_CHAT_MODEL) {
