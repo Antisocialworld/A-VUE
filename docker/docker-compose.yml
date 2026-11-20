@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:${POSTGRES_VERSION:?POSTGRES_VERSION is required}
+    image: pgvector/pgvector:pg${POSTGRES_VERSION:?POSTGRES_VERSION is required}
     container_name: avue-postgres
     restart: unless-stopped
     environment:
