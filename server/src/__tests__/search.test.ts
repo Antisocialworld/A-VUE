@@ -454,7 +454,12 @@ describe('Task 6: empty-result shared-pool fallback', () => {
 
     const result = await searchMovies('spidwr man');
 
-    expect(Object.keys(result).sort()).toEqual(['movies', 'stale', 'totalResults']);
+    expect(Object.keys(result).sort()).toEqual([
+      'matchedTitle',
+      'movies',
+      'stale',
+      'totalResults',
+    ]);
     expect(result.stale).toBe(false);
     expect(result.totalResults).toBe(result.movies.length);
   });
@@ -581,5 +586,59 @@ describe('Task 6: empty-result shared-pool fallback', () => {
 
     expect(result.movies).toEqual([]);
     expect(mockSetCachedJson).not.toHaveBeenCalled();
+  });
+
+  describe('optional matchedTitle hint', () => {
+    it('is the first ranked pool title on the fallback path and never comes from the model', async () => {
+      mockSearchTmdbMovies.mockResolvedValue([]);
+      mockGetRankingMovieList.mockImplementation((name: string) =>
+        Promise.resolve(list(name === 'popular' ? [movie(3, 'Spider-Man: Brand New Day')] : [])),
+      );
+
+      const result = await searchMovies('spidwr man');
+
+      expect(result.movies).toHaveLength(1);
+      expect(result.matchedTitle).toBe(result.movies[0].title);
+      expect(result.matchedTitle).toBe('Spider-Man: Brand New Day');
+      expect(mockCorrectMovieTitle).not.toHaveBeenCalled();
+    });
+
+    it('is cached with the result under both existing keys', async () => {
+      mockSearchTmdbMovies.mockResolvedValue([]);
+      mockGetRankingMovieList.mockImplementation((name: string) =>
+        Promise.resolve(list(name === 'popular' ? [movie(3, 'Spider-Man: Brand New Day')] : [])),
+      );
+
+      const result = await searchMovies('spidwr man');
+
+      expect(mockSetCachedJson).toHaveBeenCalledTimes(2);
+      for (const call of mockSetCachedJson.mock.calls) {
+        expect(call[1]).toEqual(result);
+        expect(call[1].matchedTitle).toBe(result.movies[0].title);
+      }
+    });
+
+    it('is the first ranked TMDB title on the correction path, not the corrected text', async () => {
+      mockSearchTmdbMovies
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([movie(5, 'The Sound of Music')]);
+      mockCorrectMovieTitle.mockResolvedValue('Sound of Music');
+
+      const result = await searchMovies('sund of music');
+
+      expect(result.movies.map((m) => m.title)).toEqual(['The Sound of Music']);
+      expect(result.matchedTitle).toBe(result.movies[0].title);
+      expect(result.matchedTitle).toBe('The Sound of Music');
+      expect(result.matchedTitle).not.toBe('Sound of Music');
+    });
+
+    it('is absent on a normal TMDB result', async () => {
+      mockSearchTmdbMovies.mockResolvedValue([movie(1, 'Avatar')]);
+
+      const result = await searchMovies('avatar');
+
+      expect(result.matchedTitle).toBeUndefined();
+      expect(Object.keys(result)).not.toContain('matchedTitle');
+    });
   });
 });

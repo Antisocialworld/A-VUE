@@ -158,3 +158,22 @@ describe('Task 2: SearchScreen Invariants & Stale Response Invalidation', () => 
     expect(results).toEqual([]);
   });
 });
+
+describe('SearchScreen matchedTitle hint', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../screens/SearchScreen.tsx'),
+    'utf-8',
+  );
+
+  it('formats the one-line hint from the strings file', () => {
+    expect(STRINGS.search.showingResultsFor('Spider-Man')).toBe('Showing results for Spider-Man');
+    expect(source).toContain('{STRINGS.search.showingResultsFor(matchedTitle)}');
+    expect(source).toContain('numberOfLines={1}');
+  });
+
+  it('renders the hint only when the response carries matchedTitle', () => {
+    expect(source).toContain('setMatchedTitle(response.matchedTitle ?? null)');
+    expect(source).toContain('{matchedTitle ? (');
+    expect(source).not.toContain('accessibilityLiveRegion');
+  });
+});

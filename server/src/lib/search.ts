@@ -24,6 +24,9 @@ export const MIN_SEARCH_SCORE = 0.35;
 // Higher floor for the last-resort pool ranking so gibberish stays empty.
 const POOL_FALLBACK_MIN_SCORE = 0.5;
 
+// Optional hint field is capped so it always satisfies the response schema.
+const MAX_MATCHED_TITLE_LENGTH = 120;
+
 const STALE_SEARCH_TTL_SECONDS = 604800; // 7 days stale fallback
 
 /**
@@ -261,6 +264,9 @@ export async function searchMovies(
   const freshKey = `search:${hash}`;
   const staleKey = `search:${hash}:stale`;
 
+  // Set only when the pool fallback or the title-correction step produced the results.
+  let matchedTitle: string | undefined;
+
   // 1. Check fresh cache
   const cachedFresh = await getCachedJson<MoviesSearchResponse>(freshKey);
   if (cachedFresh) {
@@ -327,6 +333,9 @@ export async function searchMovies(
       // upstream calls beyond the pool's own cached, single-flighted lists.
       if (rankedMovies.length === 0 && !hadTmdbResults && normalizedQ.length >= 3) {
         rankedMovies = await rankPoolFallback(normalizedQ);
+        if (rankedMovies.length > 0) {
+          matchedTitle = rankedMovies[0].title.slice(0, MAX_MATCHED_TITLE_LENGTH);
+        }
       }
 
       // Last resort only: ask for one spelling correction, then search and rank locally.
@@ -357,6 +366,10 @@ export async function searchMovies(
           } catch {
             rankedMovies = [];
           }
+          // Hint uses the ranked movie's TMDB title, never the model's corrected text.
+          if (rankedMovies.length > 0) {
+            matchedTitle = rankedMovies[0].title.slice(0, MAX_MATCHED_TITLE_LENGTH);
+          }
         }
       }
 
@@ -364,6 +377,7 @@ export async function searchMovies(
         movies: rankedMovies,
         totalResults: rankedMovies.length,
         stale: false,
+        ...(matchedTitle ? { matchedTitle } : {}),
       };
 
       // 6. Cache fresh copy and stale copy in Redis. A correction error is not a real

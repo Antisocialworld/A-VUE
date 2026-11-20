@@ -6,14 +6,17 @@ export interface ToastProps {
   message: string | null;
   onDismiss: () => void;
   durationMs?: number;
+  /** Keep the toast in normal layout flow (e.g. above a clipped card) instead of floating over it. */
+  inline?: boolean;
 }
 
 export const Toast: React.FC<ToastProps> = ({
   message,
   onDismiss,
   durationMs = 4000,
+  inline = false,
 }) => {
-  const { colors, spacing, typography, radius } = useTheme();
+  const { colors, spacing, typography, radius, shadows } = useTheme();
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -46,12 +49,15 @@ export const Toast: React.FC<ToastProps> = ({
       accessibilityLiveRegion="polite"
       style={[
         styles.toastContainer,
+        !inline && styles.overlayPosition,
+        inline && { marginBottom: spacing.sm },
         {
           backgroundColor: colors.surface_container_highest,
           borderColor: colors.outline_variant,
           borderRadius: radius.md,
           paddingHorizontal: spacing.base,
           paddingVertical: spacing.md,
+          shadowColor: shadows.medium.shadowColor,
           opacity: opacityAnim,
         },
       ]}
@@ -76,17 +82,18 @@ export const Toast: React.FC<ToastProps> = ({
 
 const styles = StyleSheet.create({
   toastContainer: {
+    borderWidth: 1,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  overlayPosition: {
     position: 'absolute',
     top: 16,
     left: 16,
     right: 16,
     zIndex: 9999,
-    borderWidth: 1,
-    elevation: 6,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
   },
   toastText: {
     textAlign: 'center',

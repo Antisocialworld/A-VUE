@@ -201,6 +201,7 @@ export const STRINGS = {
     backAccessibilityLabel: 'Back to movies',
     noResultsTitle: 'No Movies Found',
     noResultsMessage: 'No movies matched your search. Try checking for typos or searching another title.',
+    showingResultsFor: (title: string) => `Showing results for ${title}`,
     minCharsHint: 'Type at least 2 characters to search',
   },
 

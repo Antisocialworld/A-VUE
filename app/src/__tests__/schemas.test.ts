@@ -7,6 +7,7 @@ import {
   signUpSchema,
   verifyCodeSchema,
 } from '../schemas/auth';
+import { moviesSearchResponseSchema } from '../schemas/movies';
 
 describe('A VUE Shared Zod Schemas', () => {
   describe('signInSchema', () => {
@@ -142,6 +143,33 @@ describe('A VUE Shared Zod Schemas', () => {
           unexpected: 123,
         });
       }).toThrow();
+    });
+  });
+
+  describe('moviesSearchResponseSchema matchedTitle', () => {
+    const base = { movies: [], totalResults: 0, stale: false };
+
+    it('accepts the optional matchedTitle field', () => {
+      const parsed = moviesSearchResponseSchema.parse({
+        ...base,
+        matchedTitle: 'The Sound of Music',
+      });
+      expect(parsed.matchedTitle).toBe('The Sound of Music');
+    });
+
+    it('accepts a response without matchedTitle', () => {
+      const parsed = moviesSearchResponseSchema.parse(base);
+      expect(parsed.matchedTitle).toBeUndefined();
+    });
+
+    it('rejects matchedTitle over 120 characters', () => {
+      expect(() =>
+        moviesSearchResponseSchema.parse({ ...base, matchedTitle: 'a'.repeat(121) }),
+      ).toThrow();
+    });
+
+    it('still rejects unknown fields (strict mode)', () => {
+      expect(() => moviesSearchResponseSchema.parse({ ...base, unexpected: true })).toThrow();
     });
   });
 

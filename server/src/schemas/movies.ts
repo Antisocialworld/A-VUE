@@ -81,6 +81,7 @@ export const moviesSearchResponseSchema = z
     movies: z.array(movieDtoSchema),
     totalResults: z.number().int().nonnegative(),
     stale: z.boolean().optional().default(false),
+    matchedTitle: z.string().max(120).optional(),
   })
   .strict();
 

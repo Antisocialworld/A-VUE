@@ -85,6 +85,7 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
         },
       ]}
     >
+      <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} inline />
       <View style={[styles.contentRow, { gap: spacing.sm }]}>
         <Pressable
           accessibilityRole="image"
@@ -228,7 +229,6 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
       <View style={{ marginTop: spacing.sm }}>
         <TmdbAttribution />
       </View>
-      <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </View>
   );
 };
@@ -236,7 +236,6 @@ export const AssistantMovieCard: React.FC<AssistantMovieCardProps> = ({
 const styles = StyleSheet.create({
   card: {
     width: '100%',
-    overflow: 'hidden',
   },
   contentRow: {
     flexDirection: 'row',

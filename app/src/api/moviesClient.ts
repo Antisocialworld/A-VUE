@@ -131,7 +131,12 @@ export class MoviesClient {
     const data = await this.request<any>(`/movies/search?q=${encoded}`, {
       method: 'GET',
     });
-    return moviesSearchResponseSchema.parse(data);
+    // Strict parse passes the optional matchedTitle through unchanged when present.
+    const parsed = moviesSearchResponseSchema.parse(data);
+    return {
+      ...parsed,
+      ...(parsed.matchedTitle ? { matchedTitle: parsed.matchedTitle } : {}),
+    };
   }
 }
 

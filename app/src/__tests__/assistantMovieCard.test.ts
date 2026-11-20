@@ -110,6 +110,13 @@ describe('Ask A VUE movie card', () => {
     expect(cardSrc).toContain('colors.on_primary');
   });
 
+  it('uses the existing shadow token for the toast shadow, not a hex literal', () => {
+    const toastSrc = fs.readFileSync(path.join(appRoot, 'components/Toast.tsx'), 'utf-8');
+    const cleanSrc = toastSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+    expect(cleanSrc.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+    expect(toastSrc).toContain('shadowColor: shadows.medium.shadowColor');
+  });
+
   it('stores the movie on assistant chat state without adding it to model history', () => {
     expect(chatSrc).toContain('movie?: AssistantMovie');
     expect(chatSrc).toContain('movie: result.movie');

@@ -31,6 +31,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [matchedTitle, setMatchedTitle] = useState<string | null>(null);
 
   // Sequence counter to discard stale out-of-order network responses
   const activeRequestIdRef = useRef(0);
@@ -44,6 +45,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       setLoading(false);
       setError(null);
       setHasSearched(false);
+      setMatchedTitle(null);
       return;
     }
 
@@ -57,11 +59,13 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       if (currentReqId === activeRequestIdRef.current) {
         setResults(response.movies);
         setHasSearched(true);
+        setMatchedTitle(response.matchedTitle ?? null);
       }
     } catch (err: any) {
       if (currentReqId === activeRequestIdRef.current) {
         setError(err);
         setHasSearched(true);
+        setMatchedTitle(null);
       }
     } finally {
       if (currentReqId === activeRequestIdRef.current) {
@@ -84,6 +88,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       setLoading(false);
       setError(null);
       setHasSearched(false);
+      setMatchedTitle(null);
       return;
     }
 
@@ -103,6 +108,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     setLoading(false);
     setError(null);
     setHasSearched(false);
+    setMatchedTitle(null);
   };
 
   const handleRetry = () => {
@@ -265,6 +271,29 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
         </View>
       </View>
 
+      {matchedTitle ? (
+        <View
+          style={[
+            styles.hintContainer,
+            { paddingHorizontal: spacing.base, paddingTop: spacing.sm },
+          ]}
+        >
+          <Text
+            allowFontScaling
+            accessibilityRole="text"
+            numberOfLines={1}
+            style={{
+              color: colors.on_surface_variant,
+              fontFamily: typography.bodySmall.fontFamily,
+              fontSize: typography.bodySmall.fontSize,
+              lineHeight: typography.bodySmall.lineHeight,
+            }}
+          >
+            {STRINGS.search.showingResultsFor(matchedTitle)}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Main Content Area */}
       {loading ? (
         renderLoadingSkeletons()
@@ -314,6 +343,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   searchBarContainer: {
+    width: '100%',
+  },
+  hintContainer: {
     width: '100%',
   },
   searchInputWrapper: {
