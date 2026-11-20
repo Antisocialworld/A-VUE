@@ -15,6 +15,7 @@ import {
 } from '../lib/assistant/model.js';
 import { checkScope, normaliseBrand, SCOPE_REFUSAL_TEXT } from '../lib/assistant/scopeGuard.js';
 import { GREETING_TEXT, isGreeting } from '../lib/assistant/greeting.js';
+import { runAssistantToolFlow } from '../lib/assistant/toolUse.js';
 import {
   checkFacts,
   classifyFactsIntent,
@@ -497,6 +498,31 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
     };
+
+    // Bounded TMDB tool round for person/credit questions. Any non-ok outcome falls
+    // through to the existing non-tool answer below; tool failures never become 5xx.
+    const toolFlowStartedAt = Date.now();
+    try {
+      const toolResult = await runAssistantToolFlow({
+        system,
+        history,
+        message: normalisedMessage,
+        model: primaryModel,
+        timeoutMs,
+        attempt: 'primary',
+      });
+      if (toolResult.used && toolResult.text) {
+        logAttempt({
+          attempt: 'primary',
+          model: primaryModel,
+          outcome: 'ok',
+          latencyMs: Date.now() - toolFlowStartedAt,
+        });
+        return reply.status(200).send({ reply: toolResult.text });
+      }
+    } catch {
+      // Defensive: the tool flow is total; a tool problem must never surface as 5xx.
+    }
 
     const primaryStartedAt = Date.now();
     try {

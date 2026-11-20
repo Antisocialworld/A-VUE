@@ -6,6 +6,30 @@ export type AssistantHistoryItem = {
   text: string;
 };
 
+/** Closed shape of a model-requested tool call. No free text is carried. */
+export type AssistantToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+/** Structured function response passed back to Gemini on the second turn. */
+export type AssistantToolResponse = {
+  name: string;
+  response: Record<string, unknown>;
+};
+
+/** Closed-set function declaration; only the assistant tool path supplies these. */
+export type AssistantToolDeclaration = {
+  name: string;
+  description?: string;
+  parameters: Record<string, unknown>;
+};
+
+export type AssistantTurnResult = {
+  text: string;
+  toolCalls: AssistantToolCall[];
+};
+
 export type AssistantAttempt = 'primary' | 'fallback';
 
 export class AssistantNotConfiguredError extends Error {
@@ -230,7 +254,7 @@ function cutToLastFullSentence(text: string): string | null {
   return cut || null;
 }
 
-export async function generate(input: {
+export type AssistantToolTurnInput = {
   system: string;
   history: AssistantHistoryItem[];
   message: string;
@@ -238,7 +262,20 @@ export async function generate(input: {
   timeoutMs?: number;
   attempt?: AssistantAttempt;
   signal?: AbortSignal;
-}): Promise<string> {
+  /** Closed-set declarations. Omitted by every caller except the assistant tool path. */
+  tools?: readonly AssistantToolDeclaration[];
+  /** Calls emitted on the previous turn; required to place function responses correctly. */
+  priorToolCalls?: readonly AssistantToolCall[];
+  /** Structured function responses for the previous turn's calls. */
+  toolResponses?: readonly AssistantToolResponse[];
+};
+
+/**
+ * One model turn. Returns both the plain text and any function calls so the assistant
+ * tool path can run a single bounded tool round. Callers that do not use tools see the
+ * exact same request shape as `generate()` did before this extension.
+ */
+export async function generateTurn(input: AssistantToolTurnInput): Promise<AssistantTurnResult> {
   const apiKey = env.GEMINI_API_KEY;
   const model = input.model ?? env.GEMINI_CHAT_MODEL;
   if (!apiKey || !model) {
@@ -246,16 +283,31 @@ export async function generate(input: {
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const contents = [
+  const contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = [
     ...input.history.map((item) => ({
       role: item.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: item.text }],
+      parts: [{ text: item.text }] as Array<Record<string, unknown>>,
     })),
     {
-      role: 'user' as const,
+      role: 'user',
       parts: [{ text: input.message }],
     },
   ];
+
+  if (input.priorToolCalls && input.priorToolCalls.length > 0) {
+    contents.push({
+      role: 'model',
+      parts: input.priorToolCalls.map((call) => ({
+        functionCall: { name: call.name, args: call.args },
+      })),
+    });
+    contents.push({
+      role: 'function',
+      parts: (input.toolResponses ?? []).map((response) => ({
+        functionResponse: { name: response.name, response: response.response },
+      })),
+    });
+  }
 
   // Gemini rejects httpOptions.timeout below 10000 ms (HTTP 400 INVALID_ARGUMENT), and a
   // 400 is non-retryable, so the fallback model would never run. Clamp once here: both the
@@ -297,28 +349,35 @@ export async function generate(input: {
       })
     : undefined;
 
+  // Built without a `tools` key unless the closed tool path supplies declarations, so
+  // every existing generate() caller keeps the exact request shape it had before.
+  const config: Record<string, unknown> = {
+    systemInstruction: input.system,
+    temperature: 0.3,
+    maxOutputTokens: 600,
+    // Lowest supported thinking setting for this SDK chat call (Task 1): thinkingBudget 0 disables thinking.
+    // Evidence: server/node_modules/@google/genai/dist/genai.d.ts:18010-18016 (ThinkingConfig.thinkingBudget?: number, "0 is DISABLED").
+    // Evidence: server/node_modules/@google/genai/dist/genai.d.ts:7260-7288 (GenerateContentConfig.thinkingConfig?: ThinkingConfig).
+    // Evidence (finish reason): server/node_modules/@google/genai/dist/genai.d.ts:1948 (Candidate.finishReason?: FinishReason), 6492-6510 (FinishReason.MAX_TOKENS).
+    thinkingConfig: { thinkingBudget: 0 },
+    abortSignal: controller.signal,
+    httpOptions: {
+      timeout: timeoutMs,
+      retryOptions: {
+        attempts: 1,
+      },
+    },
+  };
+  if (input.tools && input.tools.length > 0) {
+    config.tools = [{ functionDeclarations: input.tools.map((tool) => ({ ...tool })) }];
+  }
+
   try {
     const requests: Promise<unknown>[] = [
       ai.models.generateContent({
         model,
         contents,
-        config: {
-          systemInstruction: input.system,
-          temperature: 0.3,
-          maxOutputTokens: 600,
-          // Lowest supported thinking setting for this SDK chat call (Task 1): thinkingBudget 0 disables thinking.
-          // Evidence: server/node_modules/@google/genai/dist/genai.d.ts:18010-18016 (ThinkingConfig.thinkingBudget?: number, "0 is DISABLED").
-          // Evidence: server/node_modules/@google/genai/dist/genai.d.ts:7260-7288 (GenerateContentConfig.thinkingConfig?: ThinkingConfig).
-          // Evidence (finish reason): server/node_modules/@google/genai/dist/genai.d.ts:1948 (Candidate.finishReason?: FinishReason), 6492-6510 (FinishReason.MAX_TOKENS).
-          thinkingConfig: { thinkingBudget: 0 },
-          abortSignal: controller.signal,
-          httpOptions: {
-            timeout: timeoutMs,
-            retryOptions: {
-              attempts: 1,
-            },
-          },
-        },
+        config,
       } as any),
       deadline,
     ];
@@ -328,6 +387,24 @@ export async function generate(input: {
     const latencyMs = Date.now() - start;
     const rawText = typeof (response as any)?.text === 'string' ? (response as any).text.trim() : '';
     const finishReason = (response as any)?.candidates?.[0]?.finishReason as string | undefined;
+
+    // Function calls carry no free text. Accept an empty text only when a call is present;
+    // names and args are validated against the closed set by the tool-use layer.
+    const toolCalls: AssistantToolCall[] = [];
+    const rawCalls = (response as any)?.functionCalls;
+    if (Array.isArray(rawCalls)) {
+      for (const call of rawCalls) {
+        if (!call || typeof call.name !== 'string') continue;
+        toolCalls.push({
+          name: call.name,
+          args: call.args && typeof call.args === 'object' ? (call.args as Record<string, unknown>) : {},
+        });
+      }
+    }
+
+    if (toolCalls.length > 0) {
+      return { text: rawText, toolCalls };
+    }
 
     if (finishReason === 'MAX_TOKENS' && rawText) {
       const cut = cutToLastFullSentence(rawText);
@@ -339,7 +416,7 @@ export async function generate(input: {
           latencyMs,
         });
       }
-      return cut;
+      return { text: cut, toolCalls: [] };
     }
 
     if (!rawText) {
@@ -351,7 +428,7 @@ export async function generate(input: {
       });
     }
 
-    return rawText;
+    return { text: rawText, toolCalls: [] };
   } catch (err: unknown) {
     if (err instanceof AssistantTimeoutError) throw err;
     const latencyMs = Date.now() - start;
@@ -377,4 +454,18 @@ export async function generate(input: {
     if (timer) clearTimeout(timer);
     if (callerSignal && onCallerAbort) callerSignal.removeEventListener('abort', onCallerAbort);
   }
+}
+
+/** String-returning wrapper kept for every existing assistant caller. */
+export async function generate(input: {
+  system: string;
+  history: AssistantHistoryItem[];
+  message: string;
+  model?: string;
+  timeoutMs?: number;
+  attempt?: AssistantAttempt;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const turn = await generateTurn(input);
+  return turn.text;
 }

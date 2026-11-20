@@ -488,3 +488,99 @@ export async function searchTmdbMovies(normalizedQ: string): Promise<MovieDto[]>
   const parsed = rawTmdbNowPlayingResponseSchema.parse(rawJson);
   return parsed.results.map(mapTmdbItemToDto);
 }
+
+// --- Assistant tool adapters -------------------------------------------------
+// Only this file knows the raw person/credit shapes. The tool layer receives clean
+// structured items, never biography, overview or any other free-text blob.
+
+export type AssistantPersonItem = {
+  id: number;
+  name: string;
+  department: string | null;
+};
+
+export type AssistantCreditItem = {
+  id: number;
+  title: string;
+  year: string | null;
+  role: string | null;
+  department: string | null;
+};
+
+const rawTmdbPersonSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  known_for_department: z.string().nullable().optional().default(null),
+});
+
+const rawTmdbPersonSearchResponseSchema = z.object({
+  results: z.array(rawTmdbPersonSchema),
+});
+
+const rawTmdbCreditItemSchema = z.object({
+  id: z.number(),
+  title: z.string().optional().default(''),
+  release_date: z.string().optional().default(''),
+  character: z.string().optional().default(''),
+  job: z.string().optional().default(''),
+  department: z.string().nullable().optional().default(null),
+});
+
+const rawTmdbPersonCreditsSchema = z.object({
+  cast: z.array(rawTmdbCreditItemSchema).optional().default([]),
+  crew: z.array(rawTmdbCreditItemSchema).optional().default([]),
+});
+
+function creditYear(releaseDate: string): string | null {
+  const match = /^(\d{4})/.exec(releaseDate);
+  return match ? match[1] : null;
+}
+
+/** Person search for the assistant tool path. Never called with user identity data. */
+export async function searchTmdbPeople(normalizedName: string): Promise<AssistantPersonItem[]> {
+  const token = getTmdbToken();
+  if (!token) throw new Error('TMDB_TOKEN_MISSING');
+  const url = `${TMDB_BASE_URL}/search/person?language=en-US&query=${encodeURIComponent(normalizedName)}&page=1`;
+  const response = await fetchWithRetryAndBackoff(url, token);
+  if (!response.ok) {
+    throw new Error(`TMDB upstream person search error: ${response.status}`);
+  }
+  const parsed = rawTmdbPersonSearchResponseSchema.parse(await response.json());
+  return parsed.results.map((raw) => ({
+    id: raw.id,
+    name: raw.name,
+    department: raw.known_for_department,
+  }));
+}
+
+/** Cast and crew credits for one person id, shaped to structured fields only. */
+export async function getTmdbPersonMovieCredits(personId: number): Promise<AssistantCreditItem[]> {
+  const token = getTmdbToken();
+  if (!token) throw new Error('TMDB_TOKEN_MISSING');
+  const url = `${TMDB_BASE_URL}/person/${personId}/movie_credits?language=en-US`;
+  const response = await fetchWithRetryAndBackoff(url, token);
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new Error(`TMDB upstream credits error: ${response.status}`);
+  }
+  const parsed = rawTmdbPersonCreditsSchema.parse(await response.json());
+  const cast = parsed.cast
+    .filter((item) => item.title)
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      year: creditYear(item.release_date),
+      role: item.character || null,
+      department: 'Acting',
+    }));
+  const crew = parsed.crew
+    .filter((item) => item.title)
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      year: creditYear(item.release_date),
+      role: item.job || null,
+      department: item.department,
+    }));
+  return [...cast, ...crew];
+}
