@@ -169,10 +169,10 @@ describe('Server Environment Validation (Rule 02)', () => {
     ).toThrowError(/WEB_ALLOWED_ORIGINS/);
   });
 
-  it('defaults the assistant attempt timeout to 8000 ms, including a blank documented value', () => {
-    expect(validateEnv(validBaseEnv).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
-    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
-    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '   ' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(8000);
+  it('defaults the assistant attempt timeout to 15000 ms, including a blank documented value', () => {
+    expect(validateEnv(validBaseEnv).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(15000);
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(15000);
+    expect(validateEnv({ ...validBaseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: '   ' }).GEMINI_ATTEMPT_TIMEOUT_MS).toBe(15000);
   });
 
   it('applies a valid assistant attempt timeout override and rejects values outside 2000-15000 ms', () => {

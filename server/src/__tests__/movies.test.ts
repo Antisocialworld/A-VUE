@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import Fastify from 'fastify';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   movieDetailParamsSchema,
   movieDtoSchema,
@@ -307,5 +308,161 @@ describe('Security & Authorization Leak Prevention (Rule 02 & Task 1)', () => {
     expect(errorPayload.error.message).not.toContain('TMDB');
     expect(errorPayload.error.message).not.toContain('TOKEN');
     expect(errorPayload.error.message).not.toContain('API');
+  });
+});
+
+describe('Task C: /movies/search passes the raw query to title correction', () => {
+  const mockGetSessionUser = vi.fn();
+  const mockSearchRateLimit = vi.fn();
+  const mockSearchMovies = vi.fn();
+  const mockCorrectMovieTitle = vi.fn();
+  const mockGenerate = vi.fn();
+  const mockSearchTmdbMovies = vi.fn();
+
+  const emptyList = () => ({
+    movies: [],
+    page: 1,
+    totalPages: 0,
+    totalResults: 0,
+    stale: false,
+  });
+
+  const correctedMovie = {
+    id: 7,
+    title: 'The Sound of Music',
+    overview: 'Overview.',
+    releaseDate: '1965-01-01',
+    runtimeMinutes: 174,
+    genres: ['Musical'],
+    voteAverage: 8.1,
+    posterPath: null,
+    backdropPath: null,
+  };
+
+  async function buildRouteServer() {
+    vi.resetModules();
+    vi.doMock('../env.js', () => ({
+      env: {
+        NODE_ENV: 'test',
+        GEMINI_API_KEY: 'test-key',
+        GEMINI_CHAT_MODEL: 'test-model',
+        GEMINI_ATTEMPT_TIMEOUT_MS: 8000,
+        SEARCH_CACHE_TTL_SECONDS: 600,
+        RATE_LIMIT_SEARCH_USER: 30,
+        RATE_LIMIT_SEARCH_IP: 120,
+      },
+      isAdmin: () => false,
+      getTmdbToken: () => 'test-token',
+      getSearchCacheTtlSeconds: () => 600,
+    }));
+    vi.doMock('../lib/session.js', () => ({
+      getSessionUser: (...args: unknown[]) => mockGetSessionUser(...args),
+      UnauthorizedError: class UnauthorizedError extends Error {},
+    }));
+    vi.doMock('../lib/rateLimit.js', async () => {
+      const actual = await vi.importActual<any>('../lib/rateLimit.js');
+      return {
+        ...actual,
+        posterRateLimit: async () => {},
+        searchRateLimit: (...args: unknown[]) => mockSearchRateLimit(...args),
+      };
+    });
+    vi.doMock('../lib/tmdb.js', async () => {
+      const actual = await vi.importActual<any>('../lib/tmdb.js');
+      return {
+        ...actual,
+        searchTmdbMovies: (...args: unknown[]) => mockSearchTmdbMovies(...args),
+        getNowPlayingMovies: async () => emptyList(),
+        getRankingMovieList: async () => emptyList(),
+        getCachedJson: async () => null,
+        setCachedJson: async () => undefined,
+        singleFlight: async (_key: string, fn: () => Promise<unknown>) => fn(),
+      };
+    });
+    vi.doMock('../lib/assistant/model.js', async () => {
+      const actual = await vi.importActual<any>('../lib/assistant/model.js');
+      return { ...actual, generate: (...args: unknown[]) => mockGenerate(...args) };
+    });
+    vi.doMock('../lib/titleCorrection.js', async () => {
+      const actual = await vi.importActual<any>('../lib/titleCorrection.js');
+      return {
+        ...actual,
+        correctMovieTitle: (...args: unknown[]) => {
+          mockCorrectMovieTitle(...args);
+          return actual.correctMovieTitle(...args);
+        },
+      };
+    });
+    vi.doMock('../lib/search.js', async () => {
+      const actual = await vi.importActual<any>('../lib/search.js');
+      return {
+        ...actual,
+        searchMovies: (...args: unknown[]) => {
+          mockSearchMovies(...args);
+          return actual.searchMovies(...args);
+        },
+      };
+    });
+
+    const { movieRoutes } = await import('../routes/movies.js');
+    const app = Fastify();
+    await app.register(movieRoutes);
+    return app;
+  }
+
+  beforeEach(() => {
+    mockGetSessionUser.mockReset().mockResolvedValue({ id: 'user-1' });
+    mockSearchRateLimit.mockReset().mockResolvedValue(true);
+    mockSearchMovies.mockReset();
+    mockCorrectMovieTitle.mockReset();
+    mockGenerate.mockReset().mockResolvedValue('The Sound of Music');
+    mockSearchTmdbMovies.mockReset().mockImplementation(async (query: string) =>
+      query === 'The Sound of Music' ? [correctedMovie] : [],
+    );
+  });
+
+  it('guards a raw email query and returns the normal empty result', async () => {
+    const app = await buildRouteServer();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/movies/search?q=john%40mail.com',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ movies: [], totalResults: 0, stale: false });
+    expect(mockSearchMovies).toHaveBeenCalledWith('john mail com', 'john@mail.com');
+    expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe('john@mail.com');
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('guards a raw phone number with separators', async () => {
+    const app = await buildRouteServer();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/movies/search?q=0803%20123%204567',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ movies: [], totalResults: 0, stale: false });
+    expect(mockSearchMovies).toHaveBeenCalledWith('0803 123 4567', '0803 123 4567');
+    expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe('0803 123 4567');
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('still reaches correction for a typo and receives both query forms', async () => {
+    const app = await buildRouteServer();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/movies/search?q=sund%20of%20music',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().movies[0].title).toBe('The Sound of Music');
+    expect(mockSearchMovies).toHaveBeenCalledWith('sund of music', 'sund of music');
+    expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe('sund of music');
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    await app.close();
   });
 });

@@ -47,6 +47,8 @@ const rawTmdbMovieItemSchema = z.object({
   vote_average: z.number().optional().default(0),
   poster_path: z.string().nullable().optional().default(null),
   backdrop_path: z.string().nullable().optional().default(null),
+  popularity: z.number().optional().default(0),
+  vote_count: z.number().optional().default(0),
 });
 
 // Raw TMDB Now Playing response schema
@@ -117,6 +119,28 @@ export function mapTmdbItemToDto(raw: z.infer<typeof rawTmdbMovieItemSchema>): M
     voteAverage,
     posterPath: raw.poster_path,
     backdropPath: raw.backdrop_path,
+  };
+}
+
+/**
+ * Server-internal ranking signals. Never part of MovieDto and never returned to the app.
+ * Raw upstream names are kept in this file only.
+ */
+export type CandidateMovie = MovieDto & {
+  popularityScore: number;
+  voteCount: number;
+};
+
+export type CandidateListResponse = Omit<MoviesListResponse, 'movies'> & {
+  movies: CandidateMovie[];
+};
+
+/** Maps a raw list item to the enriched internal ranking type. */
+export function mapTmdbItemToCandidate(raw: z.infer<typeof rawTmdbMovieItemSchema>): CandidateMovie {
+  return {
+    ...mapTmdbItemToDto(raw),
+    popularityScore: raw.popularity,
+    voteCount: raw.vote_count,
   };
 }
 
@@ -295,6 +319,73 @@ export async function getNowPlayingMovies(page = 1): Promise<MoviesListResponse>
       }
 
       // No stale copy: throw clear error for app error state with Retry
+      throw new Error('TMDB_UNAVAILABLE');
+    }
+  });
+}
+
+/**
+ * Extra list endpoints for the assistant's typo-tolerant candidate pool.
+ * Same cache policy as the now-playing list (10 min fresh / 24 h stale, well inside
+ * the 7-day cap in ADR 0001) with the closed-set list name in every cache key.
+ * Page 1 only, one upstream call per list per lookup via single-flight.
+ */
+export type RankingListName = 'popular' | 'topRated';
+const RANKING_LIST_PATHS: Readonly<Record<RankingListName, string>> = {
+  popular: '/movie/popular',
+  topRated: '/movie/top_rated',
+};
+
+export async function getRankingMovieList(
+  listName: RankingListName,
+  page = 1,
+): Promise<CandidateListResponse> {
+  const token = getTmdbToken();
+  if (!token) {
+    throw new Error('TMDB_TOKEN_MISSING');
+  }
+
+  const freshKey = `tmdb:pool:${listName}:${page}`;
+  const staleKey = `tmdb:pool:${listName}:${page}:stale`;
+
+  const cachedFresh = await getCachedJson<CandidateListResponse>(freshKey);
+  if (cachedFresh) {
+    return { ...cachedFresh, stale: false };
+  }
+
+  return singleFlight(`pool:${listName}:${page}`, async () => {
+    const recheck = await getCachedJson<CandidateListResponse>(freshKey);
+    if (recheck) {
+      return { ...recheck, stale: false };
+    }
+
+    try {
+      const url = `${TMDB_BASE_URL}${RANKING_LIST_PATHS[listName]}?language=en-US&page=${page}`;
+      const response = await fetchWithRetryAndBackoff(url, token);
+      if (!response.ok) {
+        throw new Error(`TMDB upstream error: ${response.status}`);
+      }
+
+      const rawJson = await response.json();
+      const parsed = rawTmdbNowPlayingResponseSchema.parse(rawJson);
+      const result: CandidateListResponse = {
+        movies: parsed.results.map(mapTmdbItemToCandidate),
+        page: parsed.page,
+        totalPages: Math.min(parsed.total_pages, 5),
+        totalResults: parsed.total_results,
+        stale: false,
+      };
+
+      await setCachedJson(freshKey, result, FRESH_LIST_TTL_SECONDS);
+      await setCachedJson(staleKey, result, STALE_LIST_TTL_SECONDS);
+      return result;
+    } catch {
+      // No titles, queries or user text in logs: list name is a closed-set field.
+      process.stderr.write(`[TMDB Client Warning] Pool list ${listName} failed. Serving stale copy if present.\n`);
+      const cachedStale = await getCachedJson<CandidateListResponse>(staleKey);
+      if (cachedStale) {
+        return { ...cachedStale, stale: true };
+      }
       throw new Error('TMDB_UNAVAILABLE');
     }
   });

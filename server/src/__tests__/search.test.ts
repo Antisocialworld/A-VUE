@@ -1,14 +1,59 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   calculateSearchScore,
   damerauLevenshteinDistance,
   MIN_SEARCH_SCORE,
   normalizeSearchText,
+  searchMovies,
 } from '../lib/search.js';
+import { movieDtoSchema } from '../schemas/movies.js';
 import { serializeRequest } from '../server.js';
+
+const {
+  mockSearchTmdbMovies,
+  mockGetCachedJson,
+  mockSetCachedJson,
+  mockSingleFlight,
+  mockGetNowPlayingMovies,
+  mockGetRankingMovieList,
+  mockCorrectMovieTitle,
+  mockCorrectionModelCalls,
+} = vi.hoisted(() => ({
+  mockSearchTmdbMovies: vi.fn(),
+  mockGetCachedJson: vi.fn(),
+  mockSetCachedJson: vi.fn(),
+  mockSingleFlight: vi.fn(),
+  mockGetNowPlayingMovies: vi.fn(),
+  mockGetRankingMovieList: vi.fn(),
+  mockCorrectMovieTitle: vi.fn(),
+  mockCorrectionModelCalls: vi.fn(),
+}));
+
+vi.mock('../lib/tmdb.js', async () => {
+  const actual = await vi.importActual<any>('../lib/tmdb.js');
+  return {
+    ...actual,
+    searchTmdbMovies: (...args: unknown[]) => mockSearchTmdbMovies(...args),
+    getCachedJson: (...args: unknown[]) => mockGetCachedJson(...args),
+    setCachedJson: (...args: unknown[]) => mockSetCachedJson(...args),
+    singleFlight: (key: string, fn: () => Promise<unknown>) => mockSingleFlight(key, fn),
+    getNowPlayingMovies: (...args: unknown[]) => mockGetNowPlayingMovies(...args),
+    getRankingMovieList: (...args: unknown[]) => mockGetRankingMovieList(...args),
+  };
+});
+
+vi.mock('../lib/titleCorrection.js', async () => {
+  const actual = await vi.importActual<any>('../lib/titleCorrection.js');
+  return {
+    ...actual,
+    correctMovieTitle: (...args: unknown[]) => mockCorrectMovieTitle(...args),
+  };
+});
+
+import { isAllowedCorrectionInput } from '../lib/titleCorrection.js';
 
 describe('Task 1: Search Normalization', () => {
   it('strips diacritics via NFD decomposition', () => {
@@ -322,5 +367,219 @@ describe('Task 1: Debounce and Stale Response Logic', () => {
 
     // Only Request 2 ('second') should be accepted; Request 1 was discarded as stale
     expect(finalResults).toEqual(['second']);
+  });
+});
+
+describe('Task 6: empty-result shared-pool fallback', () => {
+  const list = (movies: ReturnType<typeof movie>[]) => ({
+    movies,
+    page: 1,
+    totalPages: 1,
+    totalResults: movies.length,
+    stale: false,
+  });
+
+  function movie(id: number, title: string, voteAverage = 7) {
+    return {
+      id,
+      title,
+      overview: 'Overview.',
+      releaseDate: '2026-01-01',
+      runtimeMinutes: 120,
+      genres: [],
+      voteAverage,
+      posterPath: null,
+      backdropPath: null,
+    };
+  }
+
+  beforeEach(() => {
+    mockSearchTmdbMovies.mockReset();
+    mockGetCachedJson.mockReset().mockResolvedValue(null);
+    mockSetCachedJson.mockReset().mockResolvedValue(undefined);
+    mockSingleFlight.mockReset().mockImplementation((_key: string, fn: () => Promise<unknown>) => fn());
+    mockGetNowPlayingMovies.mockReset().mockResolvedValue(list([]));
+    mockGetRankingMovieList.mockReset().mockResolvedValue(list([]));
+    mockCorrectionModelCalls.mockReset();
+    mockCorrectMovieTitle.mockReset().mockImplementation(async (raw: string) => {
+      if (!isAllowedCorrectionInput(raw)) return null;
+      mockCorrectionModelCalls(raw);
+      return null;
+    });
+  });
+
+  it('returns Spider-Man from the shared pool for "spidwr man"', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockGetRankingMovieList.mockImplementation((name: string) =>
+      Promise.resolve(
+        list(name === 'popular' ? [movie(3, 'Spider-Man: Brand New Day')] : []),
+      ),
+    );
+
+    const result = await searchMovies('spidwr man');
+
+    expect(result.movies.map((m) => m.title)).toContain('Spider-Man: Brand New Day');
+    // Now playing is read once by the pre-existing merge and once by the shared pool;
+    // both hit the same cached reader, so no extra TMDB call is made.
+    expect(mockGetNowPlayingMovies).toHaveBeenCalledTimes(2);
+    expect(mockGetRankingMovieList).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns no results for gibberish, even with a full pool', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockGetRankingMovieList.mockResolvedValue(
+      list([movie(1, 'Avatar'), movie(2, 'Batman')]),
+    );
+
+    const result = await searchMovies('asdfqwerty');
+
+    expect(result.movies).toEqual([]);
+    expect(result.totalResults).toBe(0);
+  });
+
+  it('uses the normal TMDB path for a correctly spelt title without reading the ranking lists', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([movie(1, 'Avatar')]);
+
+    const result = await searchMovies('avatar');
+
+    expect(result.movies[0].title).toBe('Avatar');
+    expect(mockGetRankingMovieList).not.toHaveBeenCalled();
+  });
+
+  it('keeps the response shape unchanged on the fallback path', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockGetRankingMovieList.mockImplementation((name: string) =>
+      Promise.resolve(list(name === 'topRated' ? [movie(4, 'Spider-Man')] : [])),
+    );
+
+    const result = await searchMovies('spidwr man');
+
+    expect(Object.keys(result).sort()).toEqual(['movies', 'stale', 'totalResults']);
+    expect(result.stale).toBe(false);
+    expect(result.totalResults).toBe(result.movies.length);
+  });
+
+  it('strips internal pool fields so fallback results match the strict DTO', async () => {
+    const internal = { ...movie(3, 'Spider-Man: Brand New Day'), popularityScore: 99, voteCount: 1234 };
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockGetRankingMovieList.mockImplementation((name: string) =>
+      Promise.resolve(list(name === 'popular' ? [internal] : [])),
+    );
+
+    const result = await searchMovies('spidwr man');
+
+    expect(result.movies).toHaveLength(1);
+    expect(Object.keys(result.movies[0]).sort()).toEqual([
+      'backdropPath',
+      'genres',
+      'id',
+      'overview',
+      'posterPath',
+      'releaseDate',
+      'runtimeMinutes',
+      'title',
+      'voteAverage',
+    ]);
+    expect(movieDtoSchema.safeParse(result.movies[0]).success).toBe(true);
+  });
+
+  it('strips internal fields from merged now-playing items', async () => {
+    const internal = { ...movie(1, 'Avatar'), popularityScore: 88, voteCount: 4321 };
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockGetNowPlayingMovies.mockResolvedValue(list([internal]));
+
+    const result = await searchMovies('avatar');
+
+    expect(result.movies).toHaveLength(1);
+    expect(movieDtoSchema.safeParse(result.movies[0]).success).toBe(true);
+    expect(Object.keys(result.movies[0])).not.toContain('popularityScore');
+    expect(Object.keys(result.movies[0])).not.toContain('voteCount');
+  });
+
+  it('returns a corrected film for a typo when every earlier step is empty', async () => {
+    mockSearchTmdbMovies
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...movie(5, 'The Sound of Music'), popularityScore: 9, voteCount: 10 }]);
+    mockCorrectMovieTitle.mockResolvedValue('The Sound of Music');
+
+    const result = await searchMovies('sund of music');
+
+    expect(result.movies.map((m) => m.title)).toEqual(['The Sound of Music']);
+    expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe('sund of music');
+    expect(mockCorrectMovieTitle.mock.calls[0][1]).toBe('search');
+    expect(mockSearchTmdbMovies).toHaveBeenNthCalledWith(1, 'sund of music');
+    expect(mockSearchTmdbMovies).toHaveBeenNthCalledWith(2, 'The Sound of Music');
+    expect(Object.keys(result.movies[0]).sort()).toEqual([
+      'backdropPath',
+      'genres',
+      'id',
+      'overview',
+      'posterPath',
+      'releaseDate',
+      'runtimeMinutes',
+      'title',
+      'voteAverage',
+    ]);
+    expect(movieDtoSchema.safeParse(result.movies[0]).success).toBe(true);
+  });
+
+  it('returns empty when the correction is null', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+
+    const result = await searchMovies('sund of music');
+
+    expect(result.movies).toEqual([]);
+    expect(mockCorrectMovieTitle).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call correction when TMDB or the pool already matched', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([movie(1, 'Avatar')]);
+    const direct = await searchMovies('avatar');
+    expect(direct.movies[0].title).toBe('Avatar');
+    expect(mockCorrectMovieTitle).not.toHaveBeenCalled();
+
+    mockSearchTmdbMovies.mockReset().mockResolvedValue([]);
+    mockGetRankingMovieList.mockImplementation((name: string) =>
+      Promise.resolve(list(name === 'popular' ? [movie(3, 'Spider-Man: Brand New Day')] : [])),
+    );
+    const pooled = await searchMovies('spidwr man');
+    expect(pooled.movies[0].title).toBe('Spider-Man: Brand New Day');
+    expect(mockCorrectMovieTitle).not.toHaveBeenCalled();
+  });
+
+  it.each(['john@mail.com', '0803 123 4567'])(
+    'guards raw input %s before any correction model call',
+    async (raw) => {
+      mockSearchTmdbMovies.mockResolvedValue([]);
+
+      const result = await searchMovies(raw);
+
+      expect(result.movies).toEqual([]);
+      expect(mockCorrectionModelCalls).not.toHaveBeenCalled();
+      expect(mockCorrectMovieTitle).toHaveBeenCalledTimes(1);
+      expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe(raw);
+    },
+  );
+
+  it('passes the raw trimmed text, not the normalised text, to the model', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+
+    await searchMovies('  sund of music  ', '  sund of music  ');
+
+    expect(mockCorrectionModelCalls).toHaveBeenCalledWith('sund of music');
+    expect(mockCorrectMovieTitle.mock.calls[0][0]).toBe('sund of music');
+  });
+
+  it('does not cache the empty search result after a correction error', async () => {
+    mockSearchTmdbMovies.mockResolvedValue([]);
+    mockCorrectMovieTitle.mockImplementation(async (_raw: string, _stage: string, signal: any) => {
+      signal.failed = true;
+      return null;
+    });
+
+    const result = await searchMovies('sund of music');
+
+    expect(result.movies).toEqual([]);
+    expect(mockSetCachedJson).not.toHaveBeenCalled();
   });
 });

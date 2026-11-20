@@ -137,6 +137,62 @@ export function isRateLimitError(err: unknown): boolean {
   return msg.includes('429') || msg.includes('rate limit') || msg.includes('resource exhausted') || msg.includes('quota');
 }
 
+export type AssistantErrorCategory =
+  | 'auth'
+  | 'quota'
+  | 'not_found'
+  | 'bad_request'
+  | 'network'
+  | 'timeout'
+  | 'blocked'
+  | 'other';
+
+const BLOCKED_FINISH_REASONS: ReadonlySet<string> = new Set([
+  'SAFETY',
+  'BLOCKLIST',
+  'RECITATION',
+  'PROHIBITED_CONTENT',
+  'SPII',
+  'IMAGE_SAFETY',
+]);
+
+const NETWORK_ERROR_NAMES: ReadonlySet<string> = new Set([
+  'FETCHERROR',
+  'NETWORKERROR',
+  'TYPEERROR',
+]);
+
+/**
+ * Coarse, closed-set category for the failed-attempt log line. Uses only the status,
+ * error class name and the SDK's fixed finishReason enum. Message text, history, keys
+ * and raw provider bodies are never read into the log field.
+ */
+export function assistantErrorCategory(
+  err: unknown,
+  finishReason?: string,
+): AssistantErrorCategory {
+  if (err instanceof AssistantTimeoutError) return 'timeout';
+  if (err instanceof AssistantRateLimitedError) return 'quota';
+  if (err instanceof AssistantNotConfiguredError) return 'auth';
+
+  const status = getErrorStatus(err);
+  const name =
+    err && typeof err === 'object' && typeof (err as { name?: unknown }).name === 'string'
+      ? ((err as { name: string }).name as string).toUpperCase()
+      : '';
+
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'quota';
+  if (status === 404) return 'not_found';
+  if (status === 400) return 'bad_request';
+  if (status === 504) return 'timeout';
+  if (name === 'ABORTERROR' || name === 'TIMEOUTERROR') return 'timeout';
+  if (finishReason && BLOCKED_FINISH_REASONS.has(finishReason.toUpperCase())) return 'blocked';
+  if (status === 0 || (typeof status === 'number' && status >= 500)) return 'network';
+  if (NETWORK_ERROR_NAMES.has(name)) return 'network';
+  return 'other';
+}
+
 export function isRetryableServerError(err: unknown): boolean {
   const status = getErrorStatus(err);
   if (status === 400 || status === 401 || status === 403 || status === 404) {
@@ -201,7 +257,10 @@ export async function generate(input: {
     },
   ];
 
-  const timeoutMs = input.timeoutMs ?? env.GEMINI_ATTEMPT_TIMEOUT_MS;
+  // Gemini rejects httpOptions.timeout below 10000 ms (HTTP 400 INVALID_ARGUMENT), and a
+  // 400 is non-retryable, so the fallback model would never run. Clamp once here: both the
+  // SDK deadline and the abort-controller timer below use this same value.
+  const timeoutMs = Math.max(10000, input.timeoutMs ?? env.GEMINI_ATTEMPT_TIMEOUT_MS);
   const attempt = input.attempt ?? 'primary';
   const start = Date.now();
   const callerSignal = input.signal;

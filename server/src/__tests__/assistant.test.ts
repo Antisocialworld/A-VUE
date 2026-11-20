@@ -7,6 +7,8 @@ const mockAssistantRateLimit = vi.fn();
 const mockGenerate = vi.fn();
 const mockGenerateContent = vi.fn();
 const mockGoogleGenAI = vi.fn();
+const mockCorrectMovieTitle = vi.fn();
+const mockCorrectedSearch = vi.fn();
 
 vi.mock('../lib/session.js', () => ({
   getSessionUser: (...args: unknown[]) => mockGetSessionUser(...args),
@@ -125,7 +127,7 @@ describe('Ask A VUE assistant route', () => {
     const res = await server.inject({
       method: 'POST',
       url: '/assistant/chat',
-      payload: { message: 'Hi' },
+      payload: { message: 'How do I book tickets?' },
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe('UNAUTHORIZED');
@@ -144,7 +146,7 @@ describe('Ask A VUE assistant route', () => {
     const res = await server.inject({
       method: 'POST',
       url: '/assistant/chat',
-      payload: { message: 'Hi' },
+      payload: { message: 'How do I book tickets?' },
     });
     expect(res.statusCode).toBe(429);
     expect(mockGenerate).not.toHaveBeenCalled();
@@ -186,7 +188,7 @@ describe('Ask A VUE assistant route', () => {
 
   it('returns 503 when GEMINI_API_KEY or GEMINI_CHAT_MODEL is missing (friendly, no raw Gemini text)', async () => {
     const server = await buildTestServer({ GEMINI_API_KEY: undefined });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(503);
     expect(res.json().error.message).toMatch(/not available/i);
     expect(JSON.stringify(res.json())).not.toContain('google');
@@ -291,7 +293,7 @@ describe('Ask A VUE assistant route', () => {
   });
 
   it('deterministically gates live-fact lookups with a fixed reply and verdict-only logs', async () => {
-    const { FACTS_REFUSAL_TEXT } = await import('../lib/assistant/factsGate.js');
+    const { factsRefusalText } = await import('../lib/assistant/factsGate.js');
     const server = await buildTestServer();
     const infoCalls: Array<[unknown, unknown]> = [];
     server.addHook('onRequest', (req, _reply, done) => {
@@ -306,7 +308,7 @@ describe('Ask A VUE assistant route', () => {
     const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message } });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ reply: FACTS_REFUSAL_TEXT });
+    expect(res.json()).toEqual({ reply: factsRefusalText(message) });
     expect(res.json().reply).toContain('0800 000 0000');
     expect(mockGenerate).not.toHaveBeenCalled();
 
@@ -348,7 +350,7 @@ describe('Ask A VUE assistant route', () => {
     const server = await buildTestServer();
     const { AssistantRateLimitedError } = await import('../lib/assistant/model.js');
     mockGenerate.mockRejectedValueOnce(new AssistantRateLimitedError('RESOURCE_EXHAUSTED secret', 429));
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(429);
     expect(res.json().error.message).toBe('Ask A VUE is busy right now. Try again shortly.');
     expect(JSON.stringify(res.json())).not.toContain('RESOURCE_EXHAUSTED');
@@ -360,7 +362,7 @@ describe('Ask A VUE assistant route', () => {
     const { AssistantGenerationError } = await import('../lib/assistant/model.js');
     mockGenerate.mockRejectedValueOnce(new AssistantGenerationError('SAFETY blocked raw detail'));
     const server = await buildTestServer();
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(502);
     expect(res.json().error.message).toMatch(/could not respond/i);
     expect(JSON.stringify(res.json())).not.toContain('SAFETY');
@@ -386,25 +388,45 @@ describe('assistant model and prompt', () => {
     const prompt = buildSystemPrompt('Wednesday 18 November 2026');
 
     const requiredFragments = [
-      'State a fact only if it is written in the prompt data.',
-      'opening hours, prices, locations or branches, refund or cancellation terms, showtimes, age ratings, and what is playing',
-      'say it cannot be confirmed here and point to the A VUE support contact above',
+      'For A VUE details, state a fact only if it is given in the conversation.',
+      'Never invent A VUE hours, prices, showtimes, policies or what is playing.',
+      'say it cannot be confirmed here and point to the A VUE support contact at 0800 000 0000.',
       'Never guess and never give typical values.',
       'You have no tools.',
       'Never offer or promise to check, look up, book, cancel or refund anything',
       'never say "I will check"',
       'Do not ask the user which branch or location they mean',
-      'do not assume more than one branch exists',
+      'Direct branch-specific questions to the Showtimes screen.',
       'Do not say "check the A VUE app"',
       'open the Showtimes or Tickets screens',
-      'Keep replies short, at most 3 sentences, in plain text.',
+      'At most 3 short sentences, in plain text.',
       'cinema opening hours',
       '0800 000 0000',
     ];
     for (const fragment of requiredFragments) {
       expect(prompt).toContain(fragment);
     }
+    expect(prompt).not.toContain('Every question is about the A VUE cinema');
+    expect(prompt).not.toContain('do not assume more than one branch exists');
+    expect(prompt).not.toContain('Facts block');
     expect(prompt).not.toMatch(/[*_`#\[\]]/); // no Markdown markers
+  });
+
+  it('allows general film questions while still forbidding invented A VUE facts', async () => {
+    vi.resetModules();
+    const { buildSystemPrompt } = await import('../lib/assistant/systemPrompt.js');
+    const prompt = buildSystemPrompt('Wednesday 18 November 2026');
+    expect(prompt).toContain(
+      'A VUE has two cinemas in Lagos (Victoria Island and Ikeja City Mall); the assistant helps with A VUE and with movies, cinema, entertainment and film professions in general.',
+    );
+    expect(prompt).toContain(
+      'For general film knowledge you may answer from your own knowledge. If you are not sure, say you are not sure.',
+    );
+    expect(prompt).toContain(
+      'Do not state release dates, cast or plot details as certain unless you are confident; you may suggest asking for the poster to get the overview.',
+    );
+    expect(prompt).toContain('Never invent A VUE hours, prices, showtimes, policies or what is playing.');
+    expect(prompt).toContain('For unrelated topics, politely say you can only help with cinema, movies, entertainment, film professions or A VUE.');
   });
 
   it('generate maps assistant history role to model and sets system/temperature/tokens/timeout, thinking, and one attempt', async () => {
@@ -436,7 +458,7 @@ describe('assistant model and prompt', () => {
     expect(arg.config.temperature).toBe(0.3);
     expect(arg.config.maxOutputTokens).toBe(600);
     expect(arg.config.thinkingConfig).toEqual({ thinkingBudget: 0 });
-    expect(arg.config.httpOptions.timeout).toBe(8000);
+    expect(arg.config.httpOptions.timeout).toBe(10000); // 8000 configured -> 10000 floor
     expect(arg.config.httpOptions.retryOptions.attempts).toBe(1);
     expect(arg.config.tools).toBeUndefined();
     expect(arg.config.toolConfig).toBeUndefined();
@@ -445,6 +467,23 @@ describe('assistant model and prompt', () => {
       { role: 'model', parts: [{ text: 'a1' }] },
       { role: 'user', parts: [{ text: 'm' }] },
     ]);
+  });
+
+  it('clamps a configured timeout below 10000 ms up to the Gemini minimum', async () => {
+    vi.resetModules();
+    vi.doUnmock('../lib/assistant/model.js');
+    vi.doMock('../env.js', () => ({ env: { ...baseEnv, GEMINI_ATTEMPT_TIMEOUT_MS: 4000 } }));
+    vi.doMock('@google/genai', () => ({
+      GoogleGenAI: function GoogleGenAI(this: any) {
+        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+      },
+    }));
+    mockGenerateContent.mockResolvedValueOnce({ text: 'Reply' });
+    const { generate } = await import('../lib/assistant/model.js');
+    await generate({ system: 'sys', history: [], message: 'm' });
+    const arg = mockGenerateContent.mock.calls[0][0];
+    expect(arg.config.httpOptions.timeout).toBe(10000);
+    expect(arg.config.thinkingConfig).toEqual({ thinkingBudget: 0 });
   });
 
   it('generate throws typed error on empty/blocked reply', async () => {
@@ -510,21 +549,34 @@ describe('assistant model and prompt', () => {
   });
 
   it('rejects with a retryable timeout when its own deadline fires on a hung SDK call', async () => {
-    vi.resetModules();
-    vi.doUnmock('../lib/assistant/model.js');
-    vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
-    vi.doMock('@google/genai', () => ({
-      GoogleGenAI: function GoogleGenAI(this: any) {
-        this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
-      },
-    }));
-    mockGenerateContent.mockImplementationOnce(() => new Promise(() => {}));
-    const mod = await import('../lib/assistant/model.js');
-    await expect(
-      mod.generate({ system: 's', history: [], message: 'm', timeoutMs: 20, attempt: 'primary' }),
-    ).rejects.toBeInstanceOf(mod.AssistantTimeoutError);
-    expect(mod.isRetryableServerError(new mod.AssistantTimeoutError())).toBe(true);
-    expect(mod.isRetryableServerError({ error: { code: 504, status: 'DEADLINE_EXCEEDED' } })).toBe(true);
+    vi.useFakeTimers();
+    try {
+      vi.resetModules();
+      vi.doUnmock('../lib/assistant/model.js');
+      vi.doMock('../env.js', () => ({ env: { ...baseEnv } }));
+      vi.doMock('@google/genai', () => ({
+        GoogleGenAI: function GoogleGenAI(this: any) {
+          this.models = { generateContent: (...args: unknown[]) => mockGenerateContent(...args) };
+        },
+      }));
+      mockGenerateContent.mockImplementationOnce(() => new Promise(() => {}));
+      const mod = await import('../lib/assistant/model.js');
+      // 20 ms is clamped to the 10000 ms floor, so advance the fake clock to that deadline.
+      const pending = mod.generate({
+        system: 's',
+        history: [],
+        message: 'm',
+        timeoutMs: 20,
+        attempt: 'primary',
+      });
+      const assertion = expect(pending).rejects.toBeInstanceOf(mod.AssistantTimeoutError);
+      await vi.advanceTimersByTimeAsync(10000);
+      await assertion;
+      expect(mod.isRetryableServerError(new mod.AssistantTimeoutError())).toBe(true);
+      expect(mod.isRetryableServerError({ error: { code: 504, status: 'DEADLINE_EXCEEDED' } })).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -535,7 +587,7 @@ describe('assistant fallback and failure logging', () => {
       .mockRejectedValueOnce(new AssistantGenerationError('primary failed', { status: 503 }))
       .mockResolvedValueOnce('Fallback reply');
     const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ reply: 'Fallback reply' });
     expect(mockGenerate).toHaveBeenCalledTimes(2);
@@ -548,7 +600,7 @@ describe('assistant fallback and failure logging', () => {
     await server.close();
   });
 
-  it('uses the configured timeout and caps the fallback so both attempts stay under the app 25 s deadline', async () => {
+  it('uses the configured timeout and caps the fallback so both attempts stay under the app 27 s deadline', async () => {
     const fixedNow = 1_700_000_000_000;
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(fixedNow);
@@ -567,15 +619,16 @@ describe('assistant fallback and failure logging', () => {
         })
         .mockResolvedValueOnce('Fallback reply');
 
-      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
 
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ reply: 'Fallback reply' });
       expect(mockGenerate).toHaveBeenCalledTimes(2);
       expect(mockGenerate.mock.calls[0][0].timeoutMs).toBe(15000);
-      // Primary used 15 s, so the fallback is capped to 24 s total, inside the app's 25 s abort.
+      // Primary used 15 s, so the route caps the fallback to a 24 s total budget; generate()
+      // still applies its 10 s floor (worst case 15 s + 10 s = 25 s, inside the app's 27 s abort).
       expect(mockGenerate.mock.calls[1][0].timeoutMs).toBe(9000);
-      expect(15000 + mockGenerate.mock.calls[1][0].timeoutMs).toBeLessThan(25000);
+      expect(15000 + mockGenerate.mock.calls[1][0].timeoutMs).toBeLessThan(27000);
     } finally {
       if (server) await server.close();
       vi.useRealTimers();
@@ -592,7 +645,7 @@ describe('assistant fallback and failure logging', () => {
       mockGenerate.mockReset();
       mockGenerate.mockRejectedValueOnce(primaryError).mockResolvedValueOnce('Fallback reply');
       const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
-      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ reply: 'Fallback reply' });
       expect(mockGenerate).toHaveBeenCalledTimes(2);
@@ -606,7 +659,7 @@ describe('assistant fallback and failure logging', () => {
     const { AssistantTimeoutError } = await import('../lib/assistant/model.js');
     mockGenerate.mockRejectedValueOnce(new AssistantTimeoutError()).mockResolvedValueOnce('Fallback reply');
     const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ reply: 'Fallback reply' });
     expect(mockGenerate).toHaveBeenCalledTimes(2);
@@ -636,7 +689,7 @@ describe('assistant fallback and failure logging', () => {
       };
       done();
     });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(502);
     expect(res.json().error.message).toMatch(/could not respond/i);
     expect(JSON.stringify(res.json())).not.toContain('raw primary');
@@ -691,7 +744,7 @@ describe('assistant fallback and failure logging', () => {
       const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
       const { AssistantGenerationError } = await import('../lib/assistant/model.js');
       mockGenerate.mockRejectedValueOnce(new AssistantGenerationError(`status ${status}`, { status }));
-      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+      const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
       expect(res.statusCode).toBe(502);
       expect(mockGenerate).toHaveBeenCalledTimes(1);
       await server.close();
@@ -704,7 +757,7 @@ describe('assistant fallback and failure logging', () => {
       .mockRejectedValueOnce(new AssistantRateLimitedError('RESOURCE_EXHAUSTED raw primary detail', 429))
       .mockResolvedValueOnce('Fallback reply');
     const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: 'gemini-fallback-model' });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ reply: 'Fallback reply' });
@@ -738,7 +791,7 @@ describe('assistant fallback and failure logging', () => {
       done();
     });
 
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
 
     expect(res.statusCode).toBe(429);
     expect(res.json().error.code).toBe('RATE_LIMIT_EXCEEDED');
@@ -753,6 +806,7 @@ describe('assistant fallback and failure logging', () => {
     for (const call of failures) {
       expect(Object.keys(call[0] as Record<string, unknown>).sort()).toEqual([
         'attempt',
+        'category',
         'finishReason',
         'latencyMs',
         'model',
@@ -770,7 +824,7 @@ describe('assistant fallback and failure logging', () => {
     const { AssistantGenerationError } = await import('../lib/assistant/model.js');
     mockGenerate.mockRejectedValueOnce(new AssistantGenerationError('unavailable', { status: 503 }));
     const server = await buildTestServer({ GEMINI_FALLBACK_MODEL: undefined });
-    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'Hi' } });
+    const res = await server.inject({ method: 'POST', url: '/assistant/chat', payload: { message: 'How do I book tickets?' } });
     expect(res.statusCode).toBe(502);
     expect(mockGenerate).toHaveBeenCalledTimes(1);
     await server.close();
@@ -836,6 +890,8 @@ describe('.env.example assistant entries', () => {
 
 describe('Ask A VUE movie lookup route', () => {
   const mockSearchMovies = vi.fn();
+  const mockPoolNowPlaying = vi.fn();
+  const mockPoolRankingList = vi.fn();
 
   function makeMovie(overrides: Record<string, unknown> = {}) {
     return {
@@ -868,11 +924,34 @@ describe('Ask A VUE movie lookup route', () => {
   beforeEach(() => {
     mockSearchMovies.mockReset();
     mockSearchMovies.mockResolvedValue({ movies: [], totalResults: 0, stale: false });
+    mockPoolNowPlaying.mockReset();
+    mockPoolRankingList.mockReset();
+    const emptyList = { movies: [], page: 1, totalPages: 0, totalResults: 0, stale: false };
+    mockPoolNowPlaying.mockResolvedValue(emptyList);
+    mockPoolRankingList.mockResolvedValue(emptyList);
+    mockCorrectMovieTitle.mockReset();
+    mockCorrectMovieTitle.mockResolvedValue(null);
+    mockCorrectedSearch.mockReset();
+    mockCorrectedSearch.mockResolvedValue([]);
     vi.doMock('../lib/search.js', async () => {
       const actual = await vi.importActual<any>('../lib/search.js');
       return {
         ...actual,
         searchMovies: (...args: unknown[]) => mockSearchMovies(...args),
+      };
+    });
+    vi.doMock('../lib/titleCorrection.js', () => ({
+      correctMovieTitle: (...args: unknown[]) => mockCorrectMovieTitle(...args),
+    }));
+    // Keep list fallbacks deterministic and offline in route tests.
+    vi.doMock('../lib/tmdb.js', async () => {
+      const actual = await vi.importActual<any>('../lib/tmdb.js');
+      return {
+        ...actual,
+        getCachedJson: async () => null,
+        searchTmdbMovies: (...args: unknown[]) => mockCorrectedSearch(...args),
+        getNowPlayingMovies: (...args: unknown[]) => mockPoolNowPlaying(...args),
+        getRankingMovieList: (...args: unknown[]) => mockPoolRankingList(...args),
       };
     });
   });
@@ -988,18 +1067,29 @@ describe('Ask A VUE movie lookup route', () => {
   });
 
   it('logs only verdict and latency for lookup outcomes', async () => {
-    mockSearchMovies
-      .mockResolvedValueOnce({ movies: [makeMovie()], totalResults: 1, stale: false })
-      .mockResolvedValueOnce({ movies: [], totalResults: 0, stale: false })
-      .mockRejectedValueOnce(new Error('SEARCH_UNAVAILABLE'));
+    // Keyed by search text, not call order: the relaxed retry legitimately calls search
+    // twice for a no-result query, so queued one-shot mocks would shift between requests.
+    mockSearchMovies.mockImplementation(async (query: string) => {
+      if (query === 'dune') {
+        return { movies: [makeMovie()], totalResults: 1, stale: false };
+      }
+      if (query === 'inception') {
+        throw new Error('SEARCH_UNAVAILABLE');
+      }
+      return { movies: [], totalResults: 0, stale: false };
+    });
     const server = await buildTestServer({ GEMINI_API_KEY: undefined });
     const infoCalls = captureInfo(server);
 
-    for (let i = 0; i < 3; i += 1) {
+    for (const message of [
+      'show me Dune poster',
+      'show me Avatar poster',
+      'show me Inception poster',
+    ]) {
       await server.inject({
         method: 'POST',
         url: '/assistant/chat',
-        payload: { message: 'show me Dune poster' },
+        payload: { message },
       });
     }
 
@@ -1009,13 +1099,47 @@ describe('Ask A VUE movie lookup route', () => {
       'movie-none',
       'movie-error',
     ]);
+    expect(lookupLogs.map((call) => (call[0] as any).stage)).toEqual(['search', 'none', 'none']);
     for (const call of lookupLogs) {
-      expect(Object.keys(call[0] as object).sort()).toEqual(['latencyMs', 'verdict']);
+      expect(Object.keys(call[0] as object).sort()).toEqual(['latencyMs', 'stage', 'verdict']);
       expect((call[0] as any).latencyMs).toEqual(expect.any(Number));
     }
-    expect(JSON.stringify(lookupLogs)).not.toContain('Dune');
+    expect(JSON.stringify(lookupLogs)).not.toContain('Inception');
     expect(JSON.stringify(lookupLogs)).not.toContain('SEARCH_UNAVAILABLE');
     expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('returns not-found after a failed relaxed retry with one verdict and no model call', async () => {
+    let avatarCalls = 0;
+    mockSearchMovies.mockImplementation(async (query: string) => {
+      if (query === 'avatar') {
+        avatarCalls += 1;
+        if (avatarCalls === 1) {
+          return { movies: [], totalResults: 0, stale: false };
+        }
+        throw new Error('SEARCH_UNAVAILABLE');
+      }
+      return { movies: [], totalResults: 0, stale: false };
+    });
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const infoCalls = captureInfo(server);
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'show me Avatar poster' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      reply: "I couldn't find that movie. Try the Search screen in A VUE.",
+    });
+    expect(avatarCalls).toBe(2); // first search + one relaxed retry
+    expect(mockGenerate).not.toHaveBeenCalled();
+    const lookupLogs = infoCalls.filter((call) => call[1] === 'assistant_movie_lookup');
+    expect(lookupLogs.map((call) => (call[0] as any).verdict)).toEqual(['movie-none']);
+    expect(lookupLogs.map((call) => (call[0] as any).stage)).toEqual(['none']);
     await server.close();
   });
 
@@ -1090,11 +1214,247 @@ describe('Ask A VUE movie lookup route', () => {
     await server.close();
   });
 
+  it('returns not-found for "Can I see spidwr man poster" with no search or pool candidates', async () => {
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Can I see spidwr man poster' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      reply: "I couldn't find that movie. Try the Search screen in A VUE.",
+    });
+    expect(mockSearchMovies).toHaveBeenCalledWith('spidwr man');
+    expect(mockSearchMovies).toHaveBeenCalledTimes(2); // first search + relaxed retry
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('uses the pool stage when a misspelt title has no search candidates', async () => {
+    mockPoolRankingList.mockImplementation((name: string) =>
+      Promise.resolve({
+        movies:
+          name === 'popular'
+            ? [makeMovie({ id: 3, title: 'Spider-Man: Brand New Day' })]
+            : [],
+        page: 1,
+        totalPages: 1,
+        totalResults: name === 'popular' ? 1 : 0,
+        stale: false,
+      }),
+    );
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const infoCalls = captureInfo(server);
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Can I see spidwr man poster' },
+    });
+
+    expect(res.json()).toMatchObject({
+      reply: 'Here is what I found.',
+      movie: { title: 'Spider-Man: Brand New Day' },
+    });
+    const lookupLogs = infoCalls.filter((call) => call[1] === 'assistant_movie_lookup');
+    expect(lookupLogs.map((call) => (call[0] as any).stage)).toEqual(['pool']);
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('resolves a strong-intent typo through the last correction step', async () => {
+    mockCorrectMovieTitle.mockResolvedValue('The Sound of Music');
+    mockCorrectedSearch.mockResolvedValue([
+      makeMovie({ id: 7, title: 'The Sound of Music', releaseDate: '1965-01-01' }),
+    ]);
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const infoCalls = captureInfo(server);
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Can I see sund of music poster?' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      reply: 'Here is what I found.',
+      movie: { tmdbId: 7, title: 'The Sound of Music' },
+    });
+    expect(mockCorrectMovieTitle).toHaveBeenCalledWith('sund of music', 'assistant');
+    expect(mockCorrectedSearch).toHaveBeenCalledWith('The Sound of Music');
+    const lookupLogs = infoCalls.filter((call) => call[1] === 'assistant_movie_lookup');
+    expect(lookupLogs.map((call) => (call[0] as any).stage)).toEqual(['corrected']);
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('keeps the existing not-found reply when correction returns null', async () => {
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'Can I see sund of music poster?' },
+    });
+
+    expect(res.json()).toEqual({
+      reply: "I couldn't find that movie. Try the Search screen in A VUE.",
+    });
+    expect(mockCorrectMovieTitle).toHaveBeenCalledTimes(1);
+    expect(mockCorrectedSearch).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('never runs correction for weak or non-movie messages', async () => {
+    const server = await buildTestServer();
+    const weak = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'what does Dune look like' },
+    });
+    const other = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'How do I book tickets?' },
+    });
+
+    expect(weak.statusCode).toBe(200);
+    expect(other.statusCode).toBe(200);
+    expect(mockCorrectMovieTitle).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('adds the year hint when two near-tie results remain', async () => {
+    mockSearchMovies.mockResolvedValueOnce({
+      movies: [
+        makeMovie({ id: 1, title: 'Superman', releaseDate: '2025-07-11' }),
+        makeMovie({ id: 2, title: 'SUPERMAN', releaseDate: '2025-07-11' }),
+      ],
+      totalResults: 2,
+      stale: false,
+    });
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'show me Superman poster' },
+    });
+
+    expect(res.json()).toMatchObject({
+      reply: 'Here is what I found. You can add the year to narrow it down.',
+      movie: { title: 'Superman' },
+    });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
+  it('uses pool popularity so a bare title does not pick an older low-popularity match', async () => {
+    mockSearchMovies.mockResolvedValueOnce({
+      movies: [
+        makeMovie({ id: 1, title: 'Superman', releaseDate: '1991-01-01' }),
+        makeMovie({ id: 2, title: 'Superman', releaseDate: '2025-07-11' }),
+      ],
+      totalResults: 2,
+      stale: false,
+    });
+    mockPoolRankingList.mockImplementation((name: string) =>
+      Promise.resolve({
+        movies:
+          name === 'popular'
+            ? [
+                makeMovie({
+                  id: 2,
+                  title: 'Superman',
+                  releaseDate: '2025-07-11',
+                  popularityScore: 5000,
+                  voteCount: 10000,
+                }),
+              ]
+            : [],
+        page: 1,
+        totalPages: 1,
+        totalResults: name === 'popular' ? 1 : 0,
+        stale: false,
+      }),
+    );
+    const server = await buildTestServer({ GEMINI_API_KEY: undefined });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'show me Superman poster' },
+    });
+
+    expect(res.json()).toMatchObject({ movie: { tmdbId: 2, title: 'Superman' } });
+    expect(mockGenerate).not.toHaveBeenCalled();
+    await server.close();
+  });
+
   it('scores weak matches with the real search helper', () => {
     const routeSrc = fs.readFileSync(path.resolve(__dirname, '../routes/assistant.ts'), 'utf-8');
     expect(routeSrc).toContain('calculateSearchScore, normalizeSearchText, searchMovies');
     expect(routeSrc).toContain(
-      'calculateSearchScore(title, movie.title) >= WEAK_MATCH_MIN_SCORE',
+      'calculateSearchScore(query, movie.title) >= WEAK_MATCH_MIN_SCORE',
     );
+  });
+});
+
+describe('C6 — failed-attempt log category', () => {
+  it('maps status and error class to the closed category set', async () => {
+    const model = await import('../lib/assistant/model.js');
+    const cases: Array<[string, unknown, string | undefined, string]> = [
+      ['missing key', new model.AssistantNotConfiguredError('RAW_KEY_DETAIL'), undefined, 'auth'],
+      ['401 status', new model.AssistantGenerationError('RAW_401_DETAIL', { status: 401 }), undefined, 'auth'],
+      ['403 status', new model.AssistantGenerationError('RAW_403_DETAIL', { status: 403 }), undefined, 'auth'],
+      ['quota class', new model.AssistantRateLimitedError('RAW_QUOTA_DETAIL', 429), undefined, 'quota'],
+      ['429 status', new model.AssistantGenerationError('RAW_429_DETAIL', { status: 429 }), undefined, 'quota'],
+      ['404 status', new model.AssistantGenerationError('RAW_404_DETAIL', { status: 404 }), undefined, 'not_found'],
+      ['400 status', new model.AssistantGenerationError('RAW_400_DETAIL', { status: 400 }), undefined, 'bad_request'],
+      ['timeout class', new model.AssistantTimeoutError('RAW_TIMEOUT_DETAIL'), undefined, 'timeout'],
+      ['504 status', new model.AssistantGenerationError('RAW_504_DETAIL', { status: 504 }), undefined, 'timeout'],
+      ['abort class', Object.assign(new Error('RAW_ABORT_DETAIL'), { name: 'AbortError' }), undefined, 'timeout'],
+      ['blocked finish reason', new model.AssistantGenerationError('empty_or_blocked', { finishReason: 'SAFETY' }), 'SAFETY', 'blocked'],
+      ['5xx status', new model.AssistantGenerationError('RAW_503_DETAIL', { status: 503 }), undefined, 'network'],
+      ['network class', Object.assign(new Error('RAW_FETCH_DETAIL'), { name: 'FetchError' }), undefined, 'network'],
+      ['other', new model.AssistantGenerationError('RAW_OTHER_DETAIL'), undefined, 'other'],
+    ];
+    expect(new Set(cases.map((c) => c[3])).size).toBe(8);
+    for (const [label, err, finishReason, expected] of cases) {
+      expect(model.assistantErrorCategory(err, finishReason), label).toBe(expected);
+    }
+    // Message text alone never drives the category or leaks into the log field.
+    expect(model.assistantErrorCategory(new Error('quota secret 401 not found'))).toBe('other');
+  });
+
+  it('adds only a closed-set category field to the failed-attempt log line', async () => {
+    const server = await buildTestServer();
+    const { AssistantGenerationError } = await import('../lib/assistant/model.js');
+    mockGenerate.mockRejectedValueOnce(
+      new AssistantGenerationError('RAW_PROVIDER_BODY secret', { status: 503, finishReason: 'STOP' }),
+    );
+    const warnCalls: Array<[unknown, unknown]> = [];
+    server.addHook('onRequest', (req: any, _reply: any, done: any) => {
+      const orig = req.log.warn.bind(req.log);
+      req.log.warn = (obj: unknown, msg?: unknown, ...rest: unknown[]) => {
+        warnCalls.push([obj, msg]);
+        return (orig as any)(obj, msg, ...rest);
+      };
+      done();
+    });
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'How do I book tickets?' },
+    });
+    expect(res.statusCode).toBe(502);
+    const failures = warnCalls.filter((call) => call[1] === 'assistant_generate_failed');
+    expect(failures).toHaveLength(1);
+    expect(failures[0][0]).toMatchObject({ category: 'network', statusCode: 503, outcome: 'failed' });
+    expect([
+      'auth', 'quota', 'not_found', 'bad_request', 'network', 'timeout', 'blocked', 'other',
+    ]).toContain((failures[0][0] as { category?: string }).category);
+    expect(JSON.stringify(failures[0])).not.toContain('RAW_PROVIDER_BODY');
+    expect(JSON.stringify(failures[0])).not.toContain('secret');
+    await server.close();
   });
 });

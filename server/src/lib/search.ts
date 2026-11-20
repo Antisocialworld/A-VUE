@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 import { env } from '../env.js';
 import { MovieDto, MoviesSearchResponse } from '../schemas/movies.js';
+import { defaultPoolReaders } from './assistant/movieLookup.js';
+import {
+  correctMovieTitle,
+  isAllowedCorrectionInput,
+  type CorrectionErrorSignal,
+} from './titleCorrection.js';
 import {
   getCachedJson,
   getNowPlayingMovies,
@@ -15,7 +21,58 @@ import {
  */
 export const MIN_SEARCH_SCORE = 0.35;
 
+// Higher floor for the last-resort pool ranking so gibberish stays empty.
+const POOL_FALLBACK_MIN_SCORE = 0.5;
+
 const STALE_SEARCH_TTL_SECONDS = 604800; // 7 days stale fallback
+
+/**
+ * List readers may return the internal CandidateMovie shape. Copy only the public
+ * DTO fields so ranking signals never reach the strict app schema.
+ */
+function toMovieDto(movie: MovieDto): MovieDto {
+  return {
+    id: movie.id,
+    title: movie.title,
+    overview: movie.overview,
+    releaseDate: movie.releaseDate,
+    runtimeMinutes: movie.runtimeMinutes,
+    genres: movie.genres,
+    voteAverage: movie.voteAverage,
+    posterPath: movie.posterPath,
+    backdropPath: movie.backdropPath,
+  };
+}
+
+/**
+ * Ranks the assistant's already-cached candidate pool locally. Readers come from the
+ * shared pool helper, so this adds no TMDB calls beyond the lists already fetched:
+ * each list is cached (10 min fresh / 24 h stale) and single-flighted in tmdb.ts.
+ */
+async function rankPoolFallback(normalizedQ: string): Promise<MovieDto[]> {
+  const candidates = new Map<number, MovieDto>();
+  for (const read of defaultPoolReaders()) {
+    try {
+      const list = await read();
+      if (!list || !Array.isArray(list.movies)) continue;
+      for (const movie of list.movies) {
+        if (!candidates.has(movie.id)) candidates.set(movie.id, toMovieDto(movie));
+      }
+    } catch {
+      // One unavailable list must not block the others; no user text in this path.
+    }
+  }
+
+  return [...candidates.values()]
+    .map((movie) => ({ movie, score: calculateSearchScore(normalizedQ, movie.title) }))
+    .filter((item) => item.score >= POOL_FALLBACK_MIN_SCORE)
+    .sort((a, b) => {
+      if (Math.abs(b.score - a.score) > 0.0001) return b.score - a.score;
+      return (b.movie.voteAverage || 0) - (a.movie.voteAverage || 0);
+    })
+    .slice(0, 20)
+    .map((item) => item.movie);
+}
 
 /**
  * Set of common English filler/stop words ignored when scoring,
@@ -192,7 +249,13 @@ export function calculateSearchScore(query: string, candidateTitle: string): num
  * Privacy rule: Search query text is NEVER logged, printed, or included in any error.
  * Argon2 cannot be used here (salted and slow, the same query would never give the same key).
  */
-export async function searchMovies(normalizedQ: string): Promise<MoviesSearchResponse> {
+export async function searchMovies(
+  normalizedQ: string,
+  rawQuery?: string,
+): Promise<MoviesSearchResponse> {
+  // The correction guard needs the original typed text, before punctuation is stripped.
+  const correctionText = typeof rawQuery === 'string' ? rawQuery.trim() : normalizedQ;
+
   // BLAKE2s-256 hex digest: deterministic, private, and the same 64-character length.
   const hash = crypto.createHash('blake2s256').update(normalizedQ).digest('hex');
   const freshKey = `search:${hash}`;
@@ -215,6 +278,7 @@ export async function searchMovies(normalizedQ: string): Promise<MoviesSearchRes
     try {
       // 3. Upstream TMDB search
       const tmdbCandidates = await searchTmdbMovies(normalizedQ);
+      const hadTmdbResults = tmdbCandidates.length > 0;
 
       const candidateMap = new Map<number, { movie: MovieDto; score: number }>();
       for (const m of tmdbCandidates) {
@@ -230,7 +294,7 @@ export async function searchMovies(normalizedQ: string): Promise<MoviesSearchRes
             const score = calculateSearchScore(normalizedQ, m.title);
             const existing = candidateMap.get(m.id);
             if (!existing) {
-              candidateMap.set(m.id, { movie: m, score });
+              candidateMap.set(m.id, { movie: toMovieDto(m), score });
             } else if (score > existing.score) {
               existing.score = score;
             }
@@ -241,7 +305,7 @@ export async function searchMovies(normalizedQ: string): Promise<MoviesSearchRes
       }
 
       // 5. Filter by minimum score and sort descending by score
-      const rankedMovies = Array.from(candidateMap.values())
+      let rankedMovies = Array.from(candidateMap.values())
         .filter((item) => item.score >= MIN_SEARCH_SCORE)
         .sort((a, b) => {
           // Exact normalised title match always first (Task 6a)
@@ -258,15 +322,56 @@ export async function searchMovies(normalizedQ: string): Promise<MoviesSearchRes
         .slice(0, 20)
         .map((item) => item.movie);
 
+      // TMDB found nothing and the query is long enough to be meaningful: rank the
+      // shared cached pool locally. This keeps the same response shape and adds no
+      // upstream calls beyond the pool's own cached, single-flighted lists.
+      if (rankedMovies.length === 0 && !hadTmdbResults && normalizedQ.length >= 3) {
+        rankedMovies = await rankPoolFallback(normalizedQ);
+      }
+
+      // Last resort only: ask for one spelling correction, then search and rank locally.
+      // The corrected text is never returned to the app or logged.
+      let correctionFailed = false;
+      if (rankedMovies.length === 0 && !hadTmdbResults && normalizedQ.length >= 3) {
+        const signal: CorrectionErrorSignal = { failed: false };
+        // The helper applies the same guard and logs one closed-set 'skipped' line.
+        const correctedTitle = isAllowedCorrectionInput(correctionText)
+          ? await correctMovieTitle(correctionText, 'search', signal)
+          : await correctMovieTitle(correctionText, 'search');
+        correctionFailed = signal.failed;
+        if (correctedTitle) {
+          try {
+            const correctedHits = await searchTmdbMovies(correctedTitle);
+            const correctedCandidates = new Map<number, { movie: MovieDto; score: number }>();
+            for (const m of correctedHits) {
+              correctedCandidates.set(m.id, {
+                movie: toMovieDto(m),
+                score: calculateSearchScore(correctedTitle, m.title),
+              });
+            }
+            rankedMovies = [...correctedCandidates.values()]
+              .filter((item) => item.score >= MIN_SEARCH_SCORE)
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 20)
+              .map((item) => item.movie);
+          } catch {
+            rankedMovies = [];
+          }
+        }
+      }
+
       const result: MoviesSearchResponse = {
         movies: rankedMovies,
         totalResults: rankedMovies.length,
         stale: false,
       };
 
-      // 6. Cache fresh copy and stale copy in Redis
-      await setCachedJson(freshKey, result, env.SEARCH_CACHE_TTL_SECONDS);
-      await setCachedJson(staleKey, result, STALE_SEARCH_TTL_SECONDS);
+      // 6. Cache fresh copy and stale copy in Redis. A correction error is not a real
+      // empty result, so it must not poison either key.
+      if (!correctionFailed) {
+        await setCachedJson(freshKey, result, env.SEARCH_CACHE_TTL_SECONDS);
+        await setCachedJson(staleKey, result, STALE_SEARCH_TTL_SECONDS);
+      }
 
       return result;
     } catch (upstreamErr: any) {

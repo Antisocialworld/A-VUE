@@ -131,7 +131,7 @@ export async function movieRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       try {
-        const result = await searchMovies(normalizedQ);
+        const result = await searchMovies(normalizedQ, rawQ.trim());
         return reply.status(200).send(result);
       } catch (err: any) {
         // Privacy rule: query text is NEVER logged or echoed in errors

@@ -144,11 +144,11 @@ const envSchema = z.object({
     z.string().optional(),
   ),
   GEMINI_FALLBACK_MODEL: z.string().optional(),
-  // Per-attempt deadline; two attempts stay below the app's 25 s client timeout.
-  // Blank values (as documented in .env.example) fall back to the default.
+  // Per-attempt deadline; values below 10000 ms are rejected by Gemini, so generate()
+  // clamps to a 10000 ms floor. Blank values fall back to the default.
   GEMINI_ATTEMPT_TIMEOUT_MS: z.preprocess(
     (val) => (val === undefined || (typeof val === 'string' && val.trim() === '') ? undefined : val),
-    z.coerce.number().int().min(2000).max(15000).default(8000),
+    z.coerce.number().int().min(2000).max(15000).default(15000),
   ),
   GEMINI_EMBEDDING_MODEL: z.preprocess(
     (val) => (typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined),
