@@ -32,8 +32,20 @@ describe('facts gate plural forms', () => {
   });
 });
 
+describe('facts gate lets procedural questions reach the model', () => {
+  it.each([
+    'How do I see what movies are showing',
+    'how can I see which films are on',
+    'where do I find showtimes',
+  ])('does not gate "%s"', (message) => {
+    expect(checkFacts(message)).toEqual({ kind: 'ok' });
+  });
+});
+
 describe('facts gate keeps A VUE live data gated', () => {
   it.each([
+    'what movies are showing',
+    'what time is Avatar showing',
     'what time is the movie',
     'how much is a ticket',
     'opening hours',

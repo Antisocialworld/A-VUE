@@ -263,8 +263,12 @@ function hasQualifiedMuch(normalised: string): boolean {
   return false;
 }
 
+/** Procedural "how do I / how can I / where do I / how to" questions reach the model. */
+const PROCEDURAL_LEAD_RE = /^(?:how\s+(?:do|can)\s+i\b|how\s+to\b|where\s+do\s+i\b)/i;
+
 export function checkFacts(text: string): FactsCheck {
   const normalised = normaliseForGate(text);
+  if (PROCEDURAL_LEAD_RE.test(normalised)) return { kind: 'ok' };
   const matched =
     FACT_KEYWORDS.some((pattern) => pattern.test(normalised)) || hasQualifiedMuch(normalised);
   return matched ? { kind: 'needs-facts' } : { kind: 'ok' };

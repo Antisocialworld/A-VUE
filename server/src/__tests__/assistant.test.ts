@@ -881,14 +881,13 @@ describe('assistant fallback and failure logging', () => {
 });
 
 describe('.env.example assistant entries', () => {
-  it('contains Gemini assistant entries with fallback key and updated chat model example', () => {
+  it('contains Gemini assistant entries with no real values', () => {
     const envExamplePath = path.resolve(__dirname, '../../.env.example');
     const content = fs.readFileSync(envExamplePath, 'utf-8');
     expect(content).toContain('GEMINI_API_KEY=');
     expect(content).toMatch(/^GEMINI_API_KEY=\s*$/m);
     expect(content).toContain('GEMINI_CHAT_MODEL=gemini-3.6-flash');
-    expect(content).toContain('GEMINI_FALLBACK_MODEL=');
-    expect(content).toMatch(/^GEMINI_FALLBACK_MODEL=\s*$/m);
+    expect(content).not.toMatch(/^GEMINI_FALLBACK_MODEL=/m);
     expect(content).toContain('GEMINI_EMBEDDING_MODEL=gemini-embedding-2');
     expect(content).toContain('EMBEDDING_DIMENSIONS=768');
   });
