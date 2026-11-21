@@ -5,6 +5,7 @@
  */
 
 import { env } from '../env.js';
+import { runInBackground } from './background.js';
 import { writerPool } from './db.js';
 import { verifyTransactionWithFlutterwave } from './flutterwave.js';
 import { recordAndQueueFlutterwaveEvent } from './flutterwaveEvents.js';
@@ -177,14 +178,10 @@ export async function runPendingPaymentVerificationFallback(
         currency: row.currency,
       };
 
-      void (async () => {
-        try {
-          if (!(await acquireThrottle(payment.id))) return;
-          await verifyAndRecordPendingPayment(payment);
-        } catch {
-          logFallback('background_error');
-        }
-      })();
+      runInBackground('verify-fallback', async () => {
+        if (!(await acquireThrottle(payment.id))) return;
+        await verifyAndRecordPendingPayment(payment);
+      });
     }
   } catch {
     logFallback('fallback_error');

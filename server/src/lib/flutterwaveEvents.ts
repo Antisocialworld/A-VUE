@@ -4,6 +4,7 @@
  * derive the same event_id and use the same background processing path.
  */
 
+import { runInBackground } from './background.js';
 import { writerPool } from './db.js';
 import { processWebhookEvent } from './jobs.js';
 
@@ -42,14 +43,8 @@ export async function recordAndQueueFlutterwaveEvent(
     return { inserted: false, eventId };
   }
 
-  setImmediate(async () => {
-    try {
-      await processWebhookEvent(eventId);
-    } catch (err: any) {
-      process.stderr.write(
-        `[Webhook Background Error] Event ${eventId} failed: ${err.message}\n`,
-      );
-    }
+  runInBackground('webhook-process', async () => {
+    await processWebhookEvent(eventId);
   });
 
   return { inserted: true, eventId };

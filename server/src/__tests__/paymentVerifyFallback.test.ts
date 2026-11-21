@@ -57,7 +57,7 @@ function mockRedis(setImpl: any) {
 
 async function flushBackgroundJobs() {
   await new Promise<void>((resolve) => setImmediate(resolve));
-  await Promise.resolve();
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 beforeEach(() => {
