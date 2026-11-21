@@ -140,6 +140,15 @@ export async function processWebhookEvent(eventId: string): Promise<ProcessWebho
 
     const payment = paymentRes.rows[0];
 
+    if (payment.status === 'successful') {
+      await client.query(
+        `UPDATE webhook_events SET status = 'ignored' WHERE id = $1`,
+        [event.id]
+      );
+      await client.query('COMMIT');
+      return { status: 'ignored', message: 'Payment already successful' };
+    }
+
     // Verification & Mismatch check (Task 2):
     // Status, amount, currency, or tx_ref mismatch must NOT insert a ledger row of a type the CHECK forbids.
     // Instead mark the payment 'flagged', create no booking, confirm no seats, let hold expire naturally,
