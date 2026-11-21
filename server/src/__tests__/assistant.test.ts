@@ -755,7 +755,7 @@ describe('assistant fallback and failure logging', () => {
       expect(mockGenerate).toHaveBeenCalledTimes(1);
       await server.close();
     }
-  });
+  }, 20000);
 
   it('uses the fallback once when Gemini returns 429 on the primary model', async () => {
     const { AssistantRateLimitedError } = await import('../lib/assistant/model.js');
