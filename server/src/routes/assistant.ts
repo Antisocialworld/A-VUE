@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { env } from '../env.js';
 import { assistantRateLimit } from '../lib/rateLimit.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
-import { buildSystemPrompt } from '../lib/assistant/systemPrompt.js';
+import {
+  ASSISTANT_DEADLINE_REPLY,
+  buildSystemPrompt,
+} from '../lib/assistant/systemPrompt.js';
+import {
+  ASSISTANT_REQUEST_DEADLINE_MS,
+  MIN_MODEL_BUDGET_MS,
+} from '../lib/assistant/deadline.js';
 import {
   generate,
   isRetryableServerError,
@@ -66,6 +73,30 @@ import {
 
 // Friendly 429 copy, shared by every rate-limit response on this route.
 const ASSISTANT_BUSY_MESSAGE = 'Ask A VUE is busy right now. Try again shortly.';
+
+const ASSISTANT_DEADLINE_PATHS = [
+  'setup',
+  'scope',
+  'greeting',
+  'facts',
+  'live-facts',
+  'movie-card',
+  'tool',
+  'retrieval',
+  'generate',
+] as const;
+type AssistantDeadlinePath = (typeof ASSISTANT_DEADLINE_PATHS)[number];
+
+function remainingRequestMs(startedAt: number): number {
+  return Math.max(0, ASSISTANT_REQUEST_DEADLINE_MS - (Date.now() - startedAt));
+}
+
+/** null means the model must not be started: no useful time left in the request budget. */
+function modelAttemptBudgetMs(configuredMs: number, startedAt: number): number | null {
+  const remaining = remainingRequestMs(startedAt);
+  if (remaining < MIN_MODEL_BUDGET_MS) return null;
+  return Math.min(configuredMs, remaining);
+}
 
 const historyItemSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -202,12 +233,54 @@ async function resolveShowtimeMovieId(message: string): Promise<ShowtimeMovieMat
 
 export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/assistant/chat', async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestStartedAt = Date.now();
+    const requestController = new AbortController();
+    const signal = requestController.signal;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let deadlineLogged = false;
+    let currentPath: AssistantDeadlinePath = 'setup';
+
+    const deadlinePromise = new Promise<'deadline'>((resolve) => {
+      deadlineTimer = setTimeout(() => {
+        requestController.abort();
+        resolve('deadline');
+      }, ASSISTANT_REQUEST_DEADLINE_MS);
+    });
+
+    const logDeadlineOnce = (path: AssistantDeadlinePath): void => {
+      if (deadlineLogged) return;
+      deadlineLogged = true;
+      request.log.info({ verdict: 'assistant-deadline', path });
+    };
+
+    /** No helper that ignores its signal may write a second response after expiry. */
+    const sendIfActive = (statusCode: number, body: unknown) => {
+      if (signal.aborted || reply.sent) return;
+      reply.status(statusCode).send(body);
+    };
+    const sendDeadlineReply = (): void => {
+      if (reply.sent) return;
+      reply.status(200).send({ reply: ASSISTANT_DEADLINE_REPLY });
+    };
+
+    const runRequest = async (): Promise<void> => {
+    const logVerdict = (fields: unknown, msg: string): void => {
+      if (!signal.aborted) request.log.info(fields, msg);
+    };
+    const logWarn = (fields: unknown, msg: string): void => {
+      if (!signal.aborted) request.log.warn(fields, msg);
+    };
+    const skipForBudget = (): void => {
+      logDeadlineOnce(currentPath);
+      sendIfActive(200, { reply: ASSISTANT_DEADLINE_REPLY });
+    };
+
     let user;
     try {
       user = await getSessionUser(request);
     } catch (err: any) {
       if (err instanceof UnauthorizedError || err?.name === 'UnauthorizedError' || err?.message === 'Unauthorized') {
-        return reply.status(401).send({
+        return sendIfActive(401, {
           error: {
             code: 'UNAUTHORIZED',
             message: 'Authentication required.',
@@ -223,7 +296,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
 
     const parsed = assistantChatBodySchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({
+      return sendIfActive(400, {
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Invalid request. Check your message and try again.',
@@ -232,46 +305,61 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
       });
     }
 
+    currentPath = 'scope';
     const scope = checkScope(parsed.data.message);
     if (scope.kind === 'other-vue') {
-      request.log.info({ verdict: scope.kind }, 'assistant_scope_verdict');
-      return reply.status(200).send({ reply: SCOPE_REFUSAL_TEXT });
+      logVerdict({ verdict: scope.kind }, 'assistant_scope_verdict');
+      return sendIfActive(200, { reply: SCOPE_REFUSAL_TEXT });
     }
-    request.log.info({ verdict: scope.kind }, 'assistant_scope_verdict');
+    logVerdict({ verdict: scope.kind }, 'assistant_scope_verdict');
 
+    currentPath = 'greeting';
     if (isGreeting(parsed.data.message)) {
-      request.log.info({ verdict: 'greeting' }, 'assistant_greeting_verdict');
-      return reply.status(200).send({ reply: GREETING_TEXT });
+      logVerdict({ verdict: 'greeting' }, 'assistant_greeting_verdict');
+      return sendIfActive(200, { reply: GREETING_TEXT });
     }
 
+    currentPath = 'facts';
     const facts = checkFacts(parsed.data.message);
     if (facts.kind === 'needs-facts') {
       const factIntent = classifyFactsIntent(parsed.data.message);
 
       if (factIntent === 'price') {
+        currentPath = 'live-facts';
+        if (signal.aborted) return;
+        if (remainingRequestMs(requestStartedAt) < MIN_MODEL_BUDGET_MS) {
+          skipForBudget();
+          return;
+        }
         try {
           const replyText = buildPriceReply(await readCinemaPriceRanges());
           if (replyText) {
-            request.log.info(
+            logVerdict(
               { verdict: 'live-facts', intent: factIntent, outcome: 'answered' },
               'assistant_live_facts',
             );
-            return reply.status(200).send({ reply: replyText });
+            return sendIfActive(200, { reply: replyText });
           }
-          request.log.info(
+          logVerdict(
             { verdict: 'live-facts', intent: factIntent, outcome: 'empty' },
             'assistant_live_facts',
           );
         } catch {
-          request.log.info(
+          logVerdict(
             { verdict: 'live-facts', intent: factIntent, outcome: 'error' },
             'assistant_live_facts',
           );
         }
-        return reply.status(200).send({ reply: FACTS_REFUSAL_PRICE_TEXT });
+        return sendIfActive(200, { reply: FACTS_REFUSAL_PRICE_TEXT });
       }
 
       if (factIntent === 'showtimes') {
+        currentPath = 'live-facts';
+        if (signal.aborted) return;
+        if (remainingRequestMs(requestStartedAt) < MIN_MODEL_BUDGET_MS) {
+          skipForBudget();
+          return;
+        }
         let outcome: 'answered' | 'empty' | 'error' = 'error';
         try {
           const movie = await resolveShowtimeMovieId(parsed.data.message);
@@ -281,33 +369,39 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
               await readUpcomingShowtimes(movie.id),
             );
             if (replyText) {
-              request.log.info(
+              logVerdict(
                 { verdict: 'live-facts', intent: factIntent, outcome: 'answered' },
                 'assistant_live_facts',
               );
-              return reply.status(200).send({ reply: replyText });
+              return sendIfActive(200, { reply: replyText });
             }
           }
           outcome = 'empty';
         } catch {
           outcome = 'error';
         }
-        request.log.info(
+        logVerdict(
           { verdict: 'live-facts', intent: factIntent, outcome },
           'assistant_live_facts',
         );
-        return reply.status(200).send({ reply: FACTS_REFUSAL_SHOWTIMES_TEXT });
+        return sendIfActive(200, { reply: FACTS_REFUSAL_SHOWTIMES_TEXT });
       }
     }
-    request.log.info({ verdict: facts.kind }, 'assistant_facts_verdict');
+    logVerdict({ verdict: facts.kind }, 'assistant_facts_verdict');
     if (facts.kind === 'needs-facts') {
-      return reply.status(200).send({ reply: factsRefusalText(parsed.data.message) });
+      return sendIfActive(200, { reply: factsRefusalText(parsed.data.message) });
     }
 
+    currentPath = 'movie-card';
     const intent = detectMovieIntent(parsed.data.message);
     if (intent !== 'none') {
       const title = extractMovieTitle(parsed.data.message);
       if (title && isSearchableMovieTitle(title)) {
+        if (signal.aborted) return;
+        if (remainingRequestMs(requestStartedAt) < MIN_MODEL_BUDGET_MS) {
+          skipForBudget();
+          return;
+        }
         const hints = extractLookupHints(parsed.data.message, title);
         const query = buildLookupQuery(title, hints);
         const movieLookupStartedAt = Date.now();
@@ -316,7 +410,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
           verdict: 'movie-match' | 'movie-none' | 'movie-error',
           stage: MovieLookupStage,
         ) => {
-          request.log.info(
+          logVerdict(
             { verdict, stage, latencyMs: Date.now() - movieLookupStartedAt },
             'assistant_movie_lookup',
           );
@@ -369,26 +463,26 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
           }
           if (match) {
             logMovieLookup('movie-match', stage);
-            return reply.status(200).send({
+            return sendIfActive(200, {
               reply: uncertain ? `${MOVIE_FOUND_TEXT} ${MOVIE_YEAR_HINT_TEXT}` : MOVIE_FOUND_TEXT,
               movie: toMovieSummary(match),
             });
           }
           logMovieLookup('movie-none', 'none');
           if (intent === 'strong') {
-            return reply.status(200).send({ reply: MOVIE_NOT_FOUND_TEXT });
+            return sendIfActive(200, { reply: MOVIE_NOT_FOUND_TEXT });
           }
         } catch {
           logMovieLookup('movie-error', 'none');
           if (intent === 'strong') {
-            return reply.status(200).send({ reply: MOVIE_UNAVAILABLE_TEXT });
+            return sendIfActive(200, { reply: MOVIE_UNAVAILABLE_TEXT });
           }
         }
       }
     }
 
     if (!env.GEMINI_API_KEY || !env.GEMINI_CHAT_MODEL) {
-      return reply.status(503).send({
+      return sendIfActive(503, {
         error: {
           code: 'SERVICE_UNAVAILABLE',
           message: 'Ask A VUE is not available right now. Please try again later.',
@@ -435,9 +529,9 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         fields.category = meta.category;
       }
       if (meta.outcome === 'ok') {
-        request.log.info(fields, 'assistant_generate_ok');
+        logVerdict(fields, 'assistant_generate_ok');
       } else {
-        request.log.warn(fields, 'assistant_generate_failed');
+        logWarn(fields, 'assistant_generate_failed');
       }
     };
 
@@ -469,7 +563,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
 
     const toGenerationResponse = (err: unknown) => {
       if (err instanceof AssistantRateLimitedError) {
-        return reply.status(429).send({
+        return sendIfActive(429, {
           error: {
             code: 'RATE_LIMIT_EXCEEDED',
             message: ASSISTANT_BUSY_MESSAGE,
@@ -478,7 +572,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       if (err instanceof AssistantNotConfiguredError) {
-        return reply.status(503).send({
+        return sendIfActive(503, {
           error: {
             code: 'SERVICE_UNAVAILABLE',
             message: 'Ask A VUE is not available right now. Please try again later.',
@@ -487,7 +581,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       if (err instanceof AssistantGenerationError) {
-        return reply.status(502).send({
+        return sendIfActive(502, {
           error: {
             code: 'BAD_GATEWAY',
             message: 'Ask A VUE could not respond right now. Please try again.',
@@ -495,7 +589,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      return reply.status(502).send({
+      return sendIfActive(502, {
         error: {
           code: 'BAD_GATEWAY',
           message: 'Ask A VUE could not respond right now. Please try again.',
@@ -506,14 +600,23 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Final model branch only: tools and RAG are mutually exclusive. RAG is a single
     // fail-open call; retrieved chunks are supplied as data to both generate attempts.
+    currentPath = 'retrieval';
+    if (signal.aborted) return;
     const toolEligible = isToolEligibleMessage(normalisedMessage);
-    const ragChunks = toolEligible ? [] : await retrieveFactChunks(normalisedMessage);
+    const ragChunks = toolEligible ? [] : await retrieveFactChunks(normalisedMessage, signal);
     if (toolEligible) logRagRetrieval('skipped');
     const systemWithFacts = withRagFactContext(system, ragChunks);
 
     // Bounded TMDB tool round for person/credit questions. Any non-ok outcome falls
     // through to the existing non-tool answer below; tool failures never become 5xx.
     if (toolEligible) {
+      currentPath = 'tool';
+      if (signal.aborted) return;
+      const toolBudgetMs = modelAttemptBudgetMs(timeoutMs, requestStartedAt);
+      if (toolBudgetMs === null) {
+        skipForBudget();
+        return;
+      }
       const toolFlowStartedAt = Date.now();
       try {
         const toolResult = await runAssistantToolFlow({
@@ -521,7 +624,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
           history,
           message: normalisedMessage,
           model: primaryModel,
-          timeoutMs,
+          timeoutMs: toolBudgetMs,
           attempt: 'primary',
         });
         if (toolResult.used && toolResult.text) {
@@ -531,13 +634,20 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
             outcome: 'ok',
             latencyMs: Date.now() - toolFlowStartedAt,
           });
-          return reply.status(200).send({ reply: toolResult.text });
+          return sendIfActive(200, { reply: toolResult.text });
         }
       } catch {
         // Defensive: the tool flow is total; a tool problem must never surface as 5xx.
       }
     }
 
+    currentPath = 'generate';
+    if (signal.aborted) return;
+    const primaryBudgetMs = modelAttemptBudgetMs(timeoutMs, requestStartedAt);
+    if (primaryBudgetMs === null) {
+      skipForBudget();
+      return;
+    }
     const primaryStartedAt = Date.now();
     try {
       const replyText = await generate({
@@ -545,8 +655,9 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         history,
         message: normalisedMessage,
         model: primaryModel,
-        timeoutMs,
+        timeoutMs: primaryBudgetMs,
         attempt: 'primary',
+        signal,
       });
       logAttempt({
         attempt: 'primary',
@@ -554,7 +665,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         outcome: 'ok',
         latencyMs: Date.now() - primaryStartedAt,
       });
-      return reply.status(200).send({ reply: replyText });
+      return sendIfActive(200, { reply: replyText });
     } catch (err: any) {
       logAttempt(failureMeta(err, 'primary', primaryModel, primaryStartedAt));
       if (err instanceof AssistantNotConfiguredError) {
@@ -567,19 +678,29 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
         return toGenerationResponse(err);
       }
 
+      if (signal.aborted) {
+        skipForBudget();
+        return;
+      }
       const fallbackStartedAt = Date.now();
       const fallbackTimeoutMs = Math.min(
         timeoutMs,
         Math.max(2000, totalAttemptBudgetMs - (fallbackStartedAt - primaryStartedAt)),
       );
+      const fallbackBudgetMs = modelAttemptBudgetMs(fallbackTimeoutMs, requestStartedAt);
+      if (fallbackBudgetMs === null) {
+        skipForBudget();
+        return;
+      }
       try {
         const fallbackReply = await generate({
           system: systemWithFacts,
           history,
           message: normalisedMessage,
           model: fallbackModel,
-          timeoutMs: fallbackTimeoutMs,
+          timeoutMs: fallbackBudgetMs,
           attempt: 'fallback',
+          signal,
         });
         logAttempt({
           attempt: 'fallback',
@@ -587,11 +708,31 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
           outcome: 'ok',
           latencyMs: Date.now() - fallbackStartedAt,
         });
-        return reply.status(200).send({ reply: fallbackReply });
+        return sendIfActive(200, { reply: fallbackReply });
       } catch (fallbackErr: any) {
         logAttempt(failureMeta(fallbackErr, 'fallback', fallbackModel, fallbackStartedAt));
         return toGenerationResponse(fallbackErr);
       }
+    }
+    };
+
+    let requestError: unknown;
+    const requestPromise = runRequest()
+      .then(() => 'done' as const)
+      .catch((err: unknown) => {
+        requestError = err;
+        return 'failed' as const;
+      });
+
+    try {
+      const outcome = await Promise.race([requestPromise, deadlinePromise]);
+      if (outcome === 'failed') throw requestError;
+      if (outcome === 'deadline') {
+        logDeadlineOnce(currentPath);
+        sendDeadlineReply();
+      }
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
     }
   });
 }

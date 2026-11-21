@@ -1,6 +1,10 @@
 // Replace before shipping.
 export const ASSISTANT_SUPPORT_CONTACT = '0800 000 0000';
 
+// Server-side assistant text for an overall request deadline; no app strings.ts surface here.
+export const ASSISTANT_DEADLINE_REPLY =
+  'I could not finish that in time. Please try again.';
+
 export function buildSystemPrompt(todayLagos: string): string {
   const contact = ASSISTANT_SUPPORT_CONTACT;
   return [
