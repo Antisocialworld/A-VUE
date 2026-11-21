@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isAdmin } from '../env.js';
 import { writerPool } from '../lib/db.js';
+import { runPendingPaymentVerificationFallback } from '../lib/paymentVerificationFallback.js';
 import { getMovieDetails } from '../lib/tmdb.js';
 import { getSessionUser, UnauthorizedError } from '../lib/session.js';
 
@@ -95,6 +96,9 @@ export async function ticketRoutes(fastify: FastifyInstance) {
       }
       throw err;
     }
+
+    // Background only: must not delay or change the tickets response.
+    void runPendingPaymentVerificationFallback(user.id).catch(() => {});
 
     const pool = writerPool;
     const result = await pool.query(

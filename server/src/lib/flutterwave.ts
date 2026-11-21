@@ -8,6 +8,16 @@
 import crypto from 'node:crypto';
 import { env } from '../env.js';
 
+let hasWarnedPublicApiUrl = false;
+
+export function warnIfPublicApiUrlMissing(): void {
+  if (hasWarnedPublicApiUrl || env.PUBLIC_API_URL) return;
+  hasWarnedPublicApiUrl = true;
+  process.stderr.write(
+    '[Flutterwave Config] warning=PUBLIC_API_URL_UNSET fallback=local_redirect\n',
+  );
+}
+
 export interface CreatePaymentLinkParams {
   paymentId: string;
   txRef: string;
@@ -248,7 +258,8 @@ export function verifyFlutterwaveSignature(
  * - tx_ref matches stored record
  */
 export async function verifyTransactionWithFlutterwave(
-  transactionIdOrRef: string | number
+  transactionIdOrRef: string | number,
+  signal?: AbortSignal,
 ): Promise<FlutterwaveVerifiedTransaction> {
   const secretKey = env.FLUTTERWAVE_SECRET_KEY;
   if (!secretKey) {
@@ -266,6 +277,7 @@ export async function verifyTransactionWithFlutterwave(
       Authorization: `Bearer ${secretKey}`,
       'Content-Type': 'application/json',
     },
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {
