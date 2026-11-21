@@ -16,7 +16,8 @@
     "test:integration": "vitest run --include \"src/__tests__/**/*.integration.test.ts\"",
     "seed:loadtest-sessions": "tsx scripts/loadtest-sessions.ts",
     "seed:cinema": "tsx scripts/seed-cinema.ts",
-    "rag:ingest": "tsx scripts/ingest-rag.ts"
+    "rag:ingest": "tsx scripts/ingest-rag.ts",
+    "rag:eval": "tsx scripts/eval-rag.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.0",

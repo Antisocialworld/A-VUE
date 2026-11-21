@@ -34,11 +34,17 @@ vi.mock('../lib/session.js', () => ({
 
 vi.mock('../lib/rateLimit.js', () => ({
   assistantRateLimit: (...args: unknown[]) => mocks.assistantRateLimit(...args),
+  searchRateLimit: async () => true,
 }));
 
 vi.mock('../lib/assistant/model.js', async () => {
   const actual = await vi.importActual<any>('../lib/assistant/model.js');
   return { ...actual, generate: (...args: unknown[]) => mocks.generate(...args) };
+});
+
+vi.mock('../lib/rag/retrieve.js', async () => {
+  const actual = await vi.importActual<any>('../lib/rag/retrieve.js');
+  return { ...actual, retrieveFactChunks: async () => [] };
 });
 
 vi.mock('../lib/search.js', async () => {

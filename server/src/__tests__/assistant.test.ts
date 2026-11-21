@@ -98,6 +98,12 @@ async function buildTestServer(envOverrides: Record<string, unknown> = {}) {
     };
   });
 
+  // Retrieval is tested separately; keep existing route tests on the model path.
+  vi.doMock('../lib/rag/retrieve.js', async () => {
+    const actual = await vi.importActual<any>('../lib/rag/retrieve.js');
+    return { ...actual, retrieveFactChunks: async () => [] };
+  });
+
   const { buildServer } = await import('../server.js');
   return buildServer();
 }

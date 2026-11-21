@@ -2,7 +2,13 @@ import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { env } from '../../env.js';
-import { getCachedJson, setCachedJson, getTmdbPersonMovieCredits, searchTmdbPeople } from '../tmdb.js';
+import {
+  getCachedJson,
+  setCachedJson,
+  getTmdbMovieCast,
+  getTmdbPersonMovieCredits,
+  searchTmdbPeople,
+} from '../tmdb.js';
 import { searchRateLimit } from '../rateLimit.js';
 import {
   generateTurn,
@@ -15,7 +21,7 @@ import {
 } from './model.js';
 
 // One bounded tool round, at most two function calls, eight structured items per result.
-export const TOOL_NAMES = ['lookup_person', 'lookup_movie_credits'] as const;
+export const TOOL_NAMES = ['lookup_person', 'lookup_person_filmography', 'lookup_movie_cast'] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 const MAX_TOOL_CALLS = 2;
@@ -33,7 +39,8 @@ export const TMDB_TOOL_ATTRIBUTION_TEXT =
 
 type ToolUseOutcome = 'ok' | 'none' | 'invalid' | 'error' | 'skipped';
 type LogTool = ToolName | 'none';
-type CachedToolResult = { items: Array<Record<string, unknown>>; empty: boolean };
+type ToolExecutionResult = { found: boolean; response: Record<string, unknown> };
+type CachedToolResult = ToolExecutionResult;
 
 export type AssistantToolFlowResult = {
   /** True when the message was eligible and the tool path actually ran. */
@@ -43,7 +50,12 @@ export type AssistantToolFlowResult = {
   text?: string;
 };
 
-const toolArgsSchema = z.object({ name: z.string() }).strict();
+const toolArgsSchema = z
+  .object({
+    name: z.string().optional(),
+    title: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Same character rule as isAllowedCorrectionInput, with a 2-character floor so short
@@ -58,20 +70,66 @@ export function isValidToolInput(raw: string): boolean {
   return !/[^A-Za-z0-9 '\-:.,&]/.test(raw);
 }
 
-/** Narrow eligibility for offering tools. Nothing here refuses or bans any film question. */
-const PERSON_OR_CREDITS_RE =
-  /\b(who(?:\s+is|\s+was|'s)|actor|actress|director|filmmaker|producer|screenwriter|filmography|cast|crew|credits?|starred|starring|born|biography|known\s+for|played\s+in|appeared\s+in)\b/i;
+/**
+ * Positive cues are broad on purpose: no film word is ever gated or banned. The only
+ * exclusions are messages whose subject is nothing more than a pronoun/demonstrative,
+ * because there is then no name to send to the structured lookup adapters.
+ */
+const PERSON_OR_CREDITS_RE = new RegExp(
+  [
+    String.raw`who(?:'s|\s+(?:is|was))\b`,
+    String.raw`who\s+(?:directed|directs|directing|is\s+directing|starred\s+in|played\s+in|appeared\s+in|is\s+in|was\s+in)\b`,
+    String.raw`(?:cast|director)\s+of\b`,
+    String.raw`what\s+(?:movies|films)\s+(?:is|was|has)\b`,
+    String.raw`what\s+has\s+.+\s+been\s+in\b`,
+    String.raw`(?:movies|films)\s+with\b`,
+    String.raw`known\s+for\b`,
+    String.raw`filmography\b`,
+    String.raw`(?:actor|actress|director|filmmaker|producer|screenwriter|credits?)\b`,
+  ].join('|'),
+  'i',
+);
 
-export function isToolEligibleMessage(message: string): boolean {
-  return typeof message === 'string' && PERSON_OR_CREDITS_RE.test(message);
+const CUE_PREFIX_RE =
+  /^(?:who(?:\s+(?:directed|directs|directing|is\s+directing|starred\s+in|played\s+in|appeared\s+in|is\s+in|was\s+in)|'s|\s+(?:is|was))\s+|(?:cast|director)\s+of\s+|(?:movies|films)\s+with\s+|what\s+(?:movies|films)\s+(?:is|was)\s+|what\s+has\s+)/i;
+
+const PRONOUN_SUBJECT_ONLY_RE =
+  /^(?:(?:that|this|the)\s+(?:film|movie|one)|it|him|her|he|she|they)(?:\s+in)?$/i;
+
+/** Exported for focused tests; only the closed pronoun/demonstrative subjects are declined. */
+export function isPronounOnlySubject(message: string): boolean {
+  const trimmed = message.trim().replace(/[?.!]+$/, '');
+  if (PRONOUN_SUBJECT_ONLY_RE.test(trimmed)) return true;
+  const withoutCue = trimmed.replace(CUE_PREFIX_RE, '').trim();
+  return withoutCue !== trimmed && PRONOUN_SUBJECT_ONLY_RE.test(withoutCue);
 }
 
-/** Only these two declarations are ever sent to the model. */
+export function isToolEligibleMessage(message: string): boolean {
+  if (typeof message !== 'string' || isPronounOnlySubject(message)) return false;
+  return PERSON_OR_CREDITS_RE.test(message);
+}
+
+/** Only these three declarations are ever sent to the model. */
 export const TOOL_DECLARATIONS: readonly AssistantToolDeclaration[] = [
   {
     name: 'lookup_person',
     description:
       'Look up a film professional by name when their identity or known work is uncertain. ' +
+      'Use this for a person question. Pass only the person name extracted from the user message.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Person name, 2 to 60 characters.' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'lookup_person_filmography',
+    description:
+      'Look up the movie credits of one named film professional: their filmography. ' +
+      'Use this when the user asks what movies or films a person has been in. ' +
       'Pass only the person name extracted from the user message.',
     parameters: {
       type: 'object',
@@ -83,16 +141,17 @@ export const TOOL_DECLARATIONS: readonly AssistantToolDeclaration[] = [
     },
   },
   {
-    name: 'lookup_movie_credits',
+    name: 'lookup_movie_cast',
     description:
-      'Look up the movie cast and crew credits of a film professional. ' +
-      'Pass only the person name extracted from the user message.',
+      'Look up a named movie and return its director names and up to eight cast names with characters. ' +
+      'Use this when the user asks who directed, who starred in, or who is in a specific movie. ' +
+      'Pass only the movie title extracted from the user message.',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Person name, 2 to 60 characters.' },
+        title: { type: 'string', description: 'Movie title, 2 to 60 characters.' },
       },
-      required: ['name'],
+      required: ['title'],
       additionalProperties: false,
     },
   },
@@ -102,7 +161,7 @@ function logToolUse(tool: LogTool, outcome: ToolUseOutcome): void {
   process.stdout.write(`${JSON.stringify({ verdict: 'tool-use', tool, outcome })}\n`);
 }
 
-/** Stable, non-reversible cache key; the name itself is never used as a key. */
+/** Stable, non-reversible cache key; the name or title itself is never used as a key. */
 function cacheKeyFor(tool: ToolName, query: string): string {
   const normalised = query.trim().toLowerCase().replace(/\s+/g, ' ');
   return `assistant-tool:${crypto.createHash('blake2s256').update(`${tool}:${normalised}`).digest('hex')}`;
@@ -145,43 +204,58 @@ function abortPromise(signal: AbortSignal): Promise<never> {
   });
 }
 
-/** Only the validated person name is passed to the TMDB adapter; never user or chat data. */
-async function executeTool(
-  tool: ToolName,
-  name: string,
-): Promise<{ items: Array<Record<string, unknown>> }> {
+/** Only validated lookup text is passed to the TMDB adapters; never user or chat data. */
+async function executeTool(tool: ToolName, value: string): Promise<ToolExecutionResult> {
   if (tool === 'lookup_person') {
-    const people = await searchTmdbPeople(name);
-    return {
-      items: people.slice(0, MAX_RESULT_ITEMS).map((person) => ({
-        id: person.id,
-        name: person.name,
-        department: person.department,
-      })),
-    };
+    const people = await searchTmdbPeople(value);
+    const items = people.slice(0, MAX_RESULT_ITEMS).map((person) => ({
+      id: person.id,
+      name: person.name,
+      department: person.department,
+    }));
+    return { found: items.length > 0, response: { found: items.length > 0, items } };
   }
 
-  const people = await searchTmdbPeople(name);
-  if (people.length === 0) return { items: [] };
-  const credits = await getTmdbPersonMovieCredits(people[0].id);
-  return {
-    items: credits.slice(0, MAX_RESULT_ITEMS).map((credit) => ({
+  if (tool === 'lookup_person_filmography') {
+    const people = await searchTmdbPeople(value);
+    if (people.length === 0) return { found: false, response: { found: false, items: [] } };
+    const credits = await getTmdbPersonMovieCredits(people[0].id);
+    const items = credits.slice(0, MAX_RESULT_ITEMS).map((credit) => ({
       id: credit.id,
       title: credit.title,
       year: credit.year,
       role: credit.role,
       department: credit.department,
+    }));
+    return { found: items.length > 0, response: { found: items.length > 0, items } };
+  }
+
+  const result = await getTmdbMovieCast(value);
+  if (!result) return { found: false, response: { found: false } };
+  const response = {
+    found: result.directors.length > 0 || result.cast.length > 0,
+    title: result.title,
+    year: result.year,
+    directors: result.directors.slice(0, MAX_RESULT_ITEMS),
+    // Re-pick the structured fields at the tool boundary so no extra adapter
+    // fields (including free text) can be forwarded to the model.
+    cast: result.cast.slice(0, MAX_RESULT_ITEMS).map((item) => ({
+      name: item.name,
+      character: item.character,
     })),
   };
+  return { found: response.found, response };
 }
 
-function parseToolCall(call: AssistantToolCall): { tool: ToolName; name: string } | null {
+function parseToolCall(call: AssistantToolCall): { tool: ToolName; value: string } | null {
   if (!(TOOL_NAMES as readonly string[]).includes(call.name)) return null;
   const parsed = toolArgsSchema.safeParse(call.args);
   if (!parsed.success) return null;
-  const name = parsed.data.name.trim();
-  if (!isValidToolInput(name)) return null;
-  return { tool: call.name as ToolName, name };
+  const raw = call.name === 'lookup_movie_cast' ? parsed.data.title : parsed.data.name;
+  if (!raw) return null;
+  const value = raw.trim();
+  if (!isValidToolInput(value)) return null;
+  return { tool: call.name as ToolName, value };
 }
 
 export async function runAssistantToolFlow(input: {
@@ -234,18 +308,16 @@ export async function runAssistantToolFlow(input: {
         continue;
       }
 
-      const { tool, name } = parsed;
+      const { tool, value } = parsed;
       try {
-        const key = cacheKeyFor(tool, name);
+        const key = cacheKeyFor(tool, value);
         // Cache hit precedes the rate limiter and any TMDB call.
         const cached = await getCachedJson<CachedToolResult>(key);
-        if (cached) {
-          if (cached.items.length > 0) anyOk = true;
-          logToolUse(tool, cached.items.length > 0 ? 'ok' : 'none');
-          results.push({
-            name: call.name,
-            response: { found: cached.items.length > 0, items: cached.items },
-          });
+        // Ignore entries written by the previous two-tool shape; overwrite them below.
+        if (cached && typeof cached.found === 'boolean' && cached.response) {
+          if (cached.found) anyOk = true;
+          logToolUse(tool, cached.found ? 'ok' : 'none');
+          results.push({ name: call.name, response: cached.response });
           continue;
         }
 
@@ -256,18 +328,14 @@ export async function runAssistantToolFlow(input: {
         }
 
         const executed = await Promise.race([
-          executeTool(tool, name),
+          executeTool(tool, value),
           abortPromise(controller.signal),
         ]);
-        const items = executed.items.slice(0, MAX_RESULT_ITEMS);
-        if (items.length > 0) anyOk = true;
+        if (executed.found) anyOk = true;
         // Real outcomes only: errors and timeouts are never written to the cache.
-        await setCachedJson(key, { items, empty: items.length === 0 }, CACHE_TTL_SECONDS);
-        logToolUse(tool, items.length > 0 ? 'ok' : 'none');
-        results.push({
-          name: call.name,
-          response: { found: items.length > 0, items },
-        });
+        await setCachedJson(key, executed, CACHE_TTL_SECONDS);
+        logToolUse(tool, executed.found ? 'ok' : 'none');
+        results.push({ name: call.name, response: executed.response });
       } catch {
         anyError = true;
         logToolUse(tool, 'error');

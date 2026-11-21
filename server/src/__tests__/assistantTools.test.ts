@@ -6,10 +6,13 @@ const mockGetCachedJson = vi.fn();
 const mockSetCachedJson = vi.fn();
 const mockSearchPeople = vi.fn();
 const mockPersonCredits = vi.fn();
+const mockMovieCast = vi.fn();
 const mockSearchRateLimit = vi.fn();
 const mockAssistantRateLimit = vi.fn();
 const mockGetSessionUser = vi.fn();
 const mockRunAssistantToolFlow = vi.fn();
+const mockRetrieveFactChunks = vi.fn();
+const mockLogRagRetrieval = vi.fn();
 
 const baseEnv = {
   NODE_ENV: 'test',
@@ -28,7 +31,7 @@ let originalWrite: typeof process.stdout.write;
 
 const toolCall = (name = 'lookup_person', value = 'Jet Li') => ({
   name,
-  args: { name: value },
+  args: name === 'lookup_movie_cast' ? { title: value } : { name: value },
 });
 
 function resetMocks(): void {
@@ -38,6 +41,7 @@ function resetMocks(): void {
   mockSetCachedJson.mockReset().mockResolvedValue(undefined);
   mockSearchPeople.mockReset().mockResolvedValue([]);
   mockPersonCredits.mockReset().mockResolvedValue([]);
+  mockMovieCast.mockReset().mockResolvedValue(null);
   mockSearchRateLimit.mockReset().mockResolvedValue(true);
   mockAssistantRateLimit.mockReset().mockResolvedValue(true);
   mockGetSessionUser.mockReset().mockResolvedValue({
@@ -46,6 +50,8 @@ function resetMocks(): void {
     status: 'active',
   });
   mockRunAssistantToolFlow.mockReset().mockResolvedValue({ used: false, outcome: 'skipped' });
+  mockRetrieveFactChunks.mockReset().mockResolvedValue([]);
+  mockLogRagRetrieval.mockReset();
   logs.length = 0;
 }
 
@@ -74,6 +80,7 @@ async function loadToolUse() {
     setCachedJson: (...args: unknown[]) => mockSetCachedJson(...args),
     searchTmdbPeople: (...args: unknown[]) => mockSearchPeople(...args),
     getTmdbPersonMovieCredits: (...args: unknown[]) => mockPersonCredits(...args),
+    getTmdbMovieCast: (...args: unknown[]) => mockMovieCast(...args),
   }));
   vi.doMock('../lib/rateLimit.js', () => ({
     searchRateLimit: (...args: unknown[]) => mockSearchRateLimit(...args),
@@ -120,9 +127,18 @@ async function buildRouteServer() {
     const actual = await vi.importActual<any>('../lib/assistant/model.js');
     return { ...actual, generate: (...args: unknown[]) => mockGenerate(...args) };
   });
-  vi.doMock('../lib/assistant/toolUse.js', () => ({
-    runAssistantToolFlow: (...args: unknown[]) => mockRunAssistantToolFlow(...args),
-  }));
+  vi.doMock('../lib/assistant/toolUse.js', async () => {
+    const actual = await vi.importActual<any>('../lib/assistant/toolUse.js');
+    return { ...actual, runAssistantToolFlow: (...args: unknown[]) => mockRunAssistantToolFlow(...args) };
+  });
+  vi.doMock('../lib/rag/retrieve.js', async () => {
+    const actual = await vi.importActual<any>('../lib/rag/retrieve.js');
+    return {
+      ...actual,
+      retrieveFactChunks: (...args: unknown[]) => mockRetrieveFactChunks(...args),
+      logRagRetrieval: (...args: unknown[]) => mockLogRagRetrieval(...args),
+    };
+  });
   vi.doMock('../routes/health.js', () => ({ healthRoutes: async () => {} }));
   vi.doMock('../routes/dev.js', () => ({ devRoutes: async () => {} }));
   vi.doMock('../routes/auth.js', () => ({ authRoutes: async () => {} }));
@@ -136,18 +152,62 @@ async function buildRouteServer() {
   return buildServer();
 }
 
-describe('T1: closed tool set', () => {
-  it('offers exactly the two declared tools on a person question', async () => {
+describe('T1/Task 3: closed tool set and gate', () => {
+  it('declares exactly the three tools on a person question', async () => {
     const tu = await loadToolUse();
-    expect(tu.TOOL_NAMES).toEqual(['lookup_person', 'lookup_movie_credits']);
+    expect(tu.TOOL_NAMES).toEqual([
+      'lookup_person',
+      'lookup_person_filmography',
+      'lookup_movie_cast',
+    ]);
     expect(tu.TOOL_DECLARATIONS.map((tool: { name: string }) => tool.name)).toEqual(tu.TOOL_NAMES);
     expect(tu.isToolEligibleMessage('Who is Jet Li?')).toBe(true);
-    // "that film" names no person, and "directed" is not a gate term; lookup_movie_credits
-    // needs a person name, so the tool path is correctly not offered here.
-    expect(tu.isToolEligibleMessage('Who directed that film?')).toBe(false);
-    // Both phrasings already match the existing gate and name a person.
     expect(tu.isToolEligibleMessage('What is Jet Li known for?')).toBe(true);
     expect(tu.isToolEligibleMessage('Jet Li filmography')).toBe(true);
+  });
+
+  it('accepts every widened person and movie-cast phrasing', async () => {
+    const tu = await loadToolUse();
+    const eligible = [
+      'who directed Avatar',
+      'who directs Avatar',
+      'who is directing Avatar',
+      "who's the director of Avatar",
+      'who was the director of Avatar',
+      'who starred in Avatar',
+      'who is in Avatar',
+      'cast of Avatar',
+      'director of Avatar',
+      'what movies is Jet Li in',
+      'what films is Jet Li in',
+      'what has Jet Li been in',
+      'movies with Jet Li',
+      'films with Jet Li',
+      'Jet Li filmography',
+      'Jet Li is known for martial arts',
+    ];
+    for (const message of eligible) {
+      expect(tu.isToolEligibleMessage(message)).toBe(true);
+    }
+  });
+
+  it('declines pronoun-only subjects without gating film words', async () => {
+    const tu = await loadToolUse();
+    const declined = [
+      'Who directed that film?',
+      'Who directed this movie?',
+      'cast of the film',
+      'director of that one',
+      'Who is in it?',
+      'Who is him?',
+      'Who is her?',
+      'that film',
+      'this movie',
+    ];
+    for (const message of declined) {
+      expect(tu.isToolEligibleMessage(message)).toBe(false);
+    }
+    expect(tu.isToolEligibleMessage('Who directed Avatar?')).toBe(true);
   });
 
   it('does not offer tools on non-movie/person paths', async () => {
@@ -168,6 +228,9 @@ describe('T1: closed tool set', () => {
     expect(tu.isValidToolInput('jetli')).toBe(true);
     expect(tu.isValidToolInput('jet lee')).toBe(true);
     expect(tu.isValidToolInput('Li')).toBe(true);
+    expect(tu.isValidToolInput('avatar')).toBe(true);
+    expect(tu.isValidToolInput('user@example.com')).toBe(false);
+    expect(tu.isValidToolInput('123456')).toBe(false);
 
     for (const typed of ['jetli', 'jet lee']) {
       resetMocks();
@@ -178,7 +241,6 @@ describe('T1: closed tool set', () => {
 
       const result = await tu.runAssistantToolFlow(flowInput(`Who is ${typed}?`));
       expect(result.outcome).toBe('ok');
-      // No correction step: the validated name is sent verbatim to the TMDB adapter.
       expect(mockSearchPeople).toHaveBeenCalledWith(typed);
     }
   });
@@ -222,6 +284,7 @@ describe('T1: tool-call-then-answer and fallbacks', () => {
     expect(result.outcome).toBe('invalid');
     expect(mockSearchPeople).not.toHaveBeenCalled();
     expect(mockPersonCredits).not.toHaveBeenCalled();
+    expect(mockMovieCast).not.toHaveBeenCalled();
     expect(mockSetCachedJson).not.toHaveBeenCalled();
     expect(logs.join(' ')).toContain('"outcome":"invalid"');
   });
@@ -241,13 +304,18 @@ describe('T1: tool-call-then-answer and fallbacks', () => {
     const tu = await loadToolUse();
     mockGenerateTurn.mockResolvedValueOnce({
       text: '',
-      toolCalls: [toolCall(), toolCall('lookup_movie_credits'), toolCall()],
+      toolCalls: [
+        toolCall(),
+        toolCall('lookup_person_filmography'),
+        toolCall('lookup_movie_cast', 'Avatar'),
+      ],
     });
 
     const result = await tu.runAssistantToolFlow(flowInput());
 
     expect(result.outcome).toBe('skipped');
     expect(mockSearchPeople).not.toHaveBeenCalled();
+    expect(mockMovieCast).not.toHaveBeenCalled();
     expect(mockGenerateTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -325,10 +393,10 @@ describe('T1: shaping, caching and logging', () => {
     expect(JSON.stringify(response)).not.toContain('overview');
   });
 
-  it('caps movie credits at eight structured items', async () => {
+  it('caps person filmography at eight structured items', async () => {
     const tu = await loadToolUse();
     mockGenerateTurn
-      .mockResolvedValueOnce({ text: '', toolCalls: [toolCall('lookup_movie_credits')] })
+      .mockResolvedValueOnce({ text: '', toolCalls: [toolCall('lookup_person_filmography')] })
       .mockResolvedValueOnce({ text: 'Answer.', toolCalls: [] });
     mockSearchPeople.mockResolvedValue([{ id: 1, name: 'Jet Li', department: 'Acting' }]);
     mockPersonCredits.mockResolvedValue(
@@ -342,7 +410,7 @@ describe('T1: shaping, caching and logging', () => {
       })),
     );
 
-    await tu.runAssistantToolFlow(flowInput());
+    await tu.runAssistantToolFlow(flowInput('What movies is Jet Li in?'));
 
     const response = mockGenerateTurn.mock.calls[1][0].toolResponses[0].response;
     expect(response.items).toHaveLength(8);
@@ -356,14 +424,43 @@ describe('T1: shaping, caching and logging', () => {
     expect(JSON.stringify(response)).not.toContain('overview');
   });
 
+  it('shapes movie cast as director and cast names with an eight-name cap', async () => {
+    const tu = await loadToolUse();
+    mockGenerateTurn
+      .mockResolvedValueOnce({ text: '', toolCalls: [toolCall('lookup_movie_cast', 'Avatar')] })
+      .mockResolvedValueOnce({ text: 'Answer.', toolCalls: [] });
+    mockMovieCast.mockResolvedValue({
+      title: 'Avatar',
+      year: '2009',
+      directors: ['Director A', 'Director B'],
+      cast: Array.from({ length: 20 }, (_, index) => ({
+        name: `Actor ${index}`,
+        character: `Role ${index}`,
+        overview: 'must not be forwarded',
+      })),
+    });
+
+    await tu.runAssistantToolFlow(flowInput('Who directed Avatar?'));
+
+    expect(mockMovieCast).toHaveBeenCalledWith('Avatar');
+    const response = mockGenerateTurn.mock.calls[1][0].toolResponses[0].response;
+    expect(response.title).toBe('Avatar');
+    expect(response.year).toBe('2009');
+    expect(response.directors).toEqual(['Director A', 'Director B']);
+    expect(response.cast).toHaveLength(8);
+    expect(Object.keys(response.cast[0]).sort()).toEqual(['character', 'name']);
+    expect(JSON.stringify(response)).not.toContain('overview');
+    expect(JSON.stringify(response)).not.toContain('biography');
+  });
+
   it('uses a cache hit before the rate limiter and TMDB', async () => {
     const tu = await loadToolUse();
     mockGenerateTurn
       .mockResolvedValueOnce({ text: '', toolCalls: [toolCall()] })
       .mockResolvedValueOnce({ text: 'Answer.', toolCalls: [] });
     mockGetCachedJson.mockResolvedValue({
-      items: [{ id: 9, name: 'Cached Person', department: 'Acting' }],
-      empty: false,
+      found: true,
+      response: { found: true, items: [{ id: 9, name: 'Cached Person', department: 'Acting' }] },
     });
 
     const result = await tu.runAssistantToolFlow(flowInput());
@@ -383,12 +480,12 @@ describe('T1: shaping, caching and logging', () => {
 
     expect(mockSetCachedJson).toHaveBeenCalledTimes(1);
     const written = mockSetCachedJson.mock.calls[0];
-    expect(written[1]).toEqual({ items: [], empty: true });
+    expect(written[1]).toEqual({ found: false, response: { found: false, items: [] } });
     expect(written[2]).toBe(300);
     expect(written[0]).toMatch(/^assistant-tool:[0-9a-f]{64}$/);
   });
 
-  it('logs only the closed verdict/tool/outcome set', async () => {
+  it('logs only the closed verdict/tool/outcome set with renamed tool names', async () => {
     const tu = await loadToolUse();
     mockGenerateTurn
       .mockResolvedValueOnce({ text: '', toolCalls: [toolCall()] })
@@ -402,7 +499,9 @@ describe('T1: shaping, caching and logging', () => {
       const parsed = JSON.parse(line);
       expect(Object.keys(parsed).sort()).toEqual(['outcome', 'tool', 'verdict']);
       expect(parsed.verdict).toBe('tool-use');
-      expect(['lookup_person', 'lookup_movie_credits', 'none']).toContain(parsed.tool);
+      expect(['lookup_person', 'lookup_person_filmography', 'lookup_movie_cast', 'none']).toContain(
+        parsed.tool,
+      );
       expect(['ok', 'none', 'invalid', 'error', 'skipped']).toContain(parsed.outcome);
     }
     const combined = logs.join(' ');
@@ -421,7 +520,7 @@ describe('T1: shaping, caching and logging', () => {
 });
 
 describe('T1: route integration', () => {
-  it('returns a tool answer with 200', async () => {
+  it('returns a tool answer with 200 and never retrieves RAG on a tool path', async () => {
     const app = await buildRouteServer();
     mockRunAssistantToolFlow.mockResolvedValueOnce({
       used: true,
@@ -438,6 +537,8 @@ describe('T1: route integration', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().reply).toContain('Tool answer.');
     expect(mockGenerate).not.toHaveBeenCalled();
+    expect(mockRetrieveFactChunks).not.toHaveBeenCalled();
+    expect(mockLogRagRetrieval).toHaveBeenCalledWith('skipped');
   }, 20000);
 
   it('falls back to the non-tool answer with no 5xx when tools fail', async () => {
@@ -454,6 +555,7 @@ describe('T1: route integration', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().reply).toBe('Plain model answer.');
     expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect(mockRetrieveFactChunks).not.toHaveBeenCalled();
   }, 20000);
 
   it('never asks for tools on a greeting path', async () => {
@@ -467,5 +569,43 @@ describe('T1: route integration', () => {
 
     expect(response.statusCode).toBe(200);
     expect(mockRunAssistantToolFlow).not.toHaveBeenCalled();
+    // Greetings return before the final model branch, so retrieval is not reached either.
+    expect(mockRetrieveFactChunks).not.toHaveBeenCalled();
+  }, 20000);
+
+  it('passes retrieved chunks as data to the normal model call', async () => {
+    const app = await buildRouteServer();
+    mockRetrieveFactChunks.mockResolvedValueOnce([
+      { heading: 'CHUNK avue-hold#time', content: 'Seats are held for 10 minutes while you pay.', distance: 0.1 },
+    ]);
+    mockGenerate.mockResolvedValueOnce('Ten minutes.');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'How long are seats held?' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().reply).toBe('Ten minutes.');
+    expect(mockRunAssistantToolFlow).not.toHaveBeenCalled();
+    const generateInput = mockGenerate.mock.calls[0][0];
+    expect(generateInput.system).toContain('<A_VUE_FACTS_DATA>');
+    expect(generateInput.system).toContain('heading: CHUNK avue-hold#time');
+  }, 20000);
+
+  it('leaves the model call unchanged when retrieval returns no chunks', async () => {
+    const app = await buildRouteServer();
+    mockGenerate.mockResolvedValueOnce('No facts.');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/assistant/chat',
+      payload: { message: 'How long are seats held?' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockRetrieveFactChunks).toHaveBeenCalledTimes(1);
+    expect(mockGenerate.mock.calls[0][0].system).not.toContain('<A_VUE_FACTS_DATA>');
   }, 20000);
 });

@@ -584,3 +584,62 @@ export async function getTmdbPersonMovieCredits(personId: number): Promise<Assis
     }));
   return [...cast, ...crew];
 }
+
+export type AssistantMovieCastResult = {
+  title: string;
+  year: string | null;
+  directors: string[];
+  cast: Array<{ name: string; character: string | null }>;
+};
+
+const rawTmdbMovieCreditsSchema = z.object({
+  cast: z
+    .array(
+      z.object({
+        name: z.string(),
+        character: z.string().optional().default(''),
+      }),
+    )
+    .optional()
+    .default([]),
+  crew: z
+    .array(
+      z.object({
+        name: z.string(),
+        job: z.string().optional().default(''),
+      }),
+    )
+    .optional()
+    .default([]),
+});
+
+/** Top movie match plus structured director/cast names. No overview or biography. */
+export async function getTmdbMovieCast(title: string): Promise<AssistantMovieCastResult | null> {
+  const movies = await searchTmdbMovies(title);
+  const movie = movies[0];
+  if (!movie) return null;
+
+  const token = getTmdbToken();
+  if (!token) throw new Error('TMDB_TOKEN_MISSING');
+  const url = `${TMDB_BASE_URL}/movie/${movie.id}/credits?language=en-US`;
+  const response = await fetchWithRetryAndBackoff(url, token);
+  if (response.status === 404) {
+    return { title: movie.title, year: creditYear(movie.releaseDate), directors: [], cast: [] };
+  }
+  if (!response.ok) {
+    throw new Error(`TMDB upstream movie credits error: ${response.status}`);
+  }
+
+  const parsed = rawTmdbMovieCreditsSchema.parse(await response.json());
+  return {
+    title: movie.title,
+    year: creditYear(movie.releaseDate),
+    directors: parsed.crew
+      .filter((item) => item.job.toLowerCase() === 'director')
+      .map((item) => item.name),
+    cast: parsed.cast.slice(0, 8).map((item) => ({
+      name: item.name,
+      character: item.character || null,
+    })),
+  };
+}

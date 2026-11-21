@@ -15,7 +15,12 @@ import {
 } from '../lib/assistant/model.js';
 import { checkScope, normaliseBrand, SCOPE_REFUSAL_TEXT } from '../lib/assistant/scopeGuard.js';
 import { GREETING_TEXT, isGreeting } from '../lib/assistant/greeting.js';
-import { runAssistantToolFlow } from '../lib/assistant/toolUse.js';
+import { isToolEligibleMessage, runAssistantToolFlow } from '../lib/assistant/toolUse.js';
+import {
+  logRagRetrieval,
+  retrieveFactChunks,
+  withRagFactContext,
+} from '../lib/rag/retrieve.js';
 import {
   checkFacts,
   classifyFactsIntent,
@@ -499,35 +504,44 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
       });
     };
 
+    // Final model branch only: tools and RAG are mutually exclusive. RAG is a single
+    // fail-open call; retrieved chunks are supplied as data to both generate attempts.
+    const toolEligible = isToolEligibleMessage(normalisedMessage);
+    const ragChunks = toolEligible ? [] : await retrieveFactChunks(normalisedMessage);
+    if (toolEligible) logRagRetrieval('skipped');
+    const systemWithFacts = withRagFactContext(system, ragChunks);
+
     // Bounded TMDB tool round for person/credit questions. Any non-ok outcome falls
     // through to the existing non-tool answer below; tool failures never become 5xx.
-    const toolFlowStartedAt = Date.now();
-    try {
-      const toolResult = await runAssistantToolFlow({
-        system,
-        history,
-        message: normalisedMessage,
-        model: primaryModel,
-        timeoutMs,
-        attempt: 'primary',
-      });
-      if (toolResult.used && toolResult.text) {
-        logAttempt({
-          attempt: 'primary',
+    if (toolEligible) {
+      const toolFlowStartedAt = Date.now();
+      try {
+        const toolResult = await runAssistantToolFlow({
+          system,
+          history,
+          message: normalisedMessage,
           model: primaryModel,
-          outcome: 'ok',
-          latencyMs: Date.now() - toolFlowStartedAt,
+          timeoutMs,
+          attempt: 'primary',
         });
-        return reply.status(200).send({ reply: toolResult.text });
+        if (toolResult.used && toolResult.text) {
+          logAttempt({
+            attempt: 'primary',
+            model: primaryModel,
+            outcome: 'ok',
+            latencyMs: Date.now() - toolFlowStartedAt,
+          });
+          return reply.status(200).send({ reply: toolResult.text });
+        }
+      } catch {
+        // Defensive: the tool flow is total; a tool problem must never surface as 5xx.
       }
-    } catch {
-      // Defensive: the tool flow is total; a tool problem must never surface as 5xx.
     }
 
     const primaryStartedAt = Date.now();
     try {
       const replyText = await generate({
-        system,
+        system: systemWithFacts,
         history,
         message: normalisedMessage,
         model: primaryModel,
@@ -560,7 +574,7 @@ export async function assistantRoutes(fastify: FastifyInstance): Promise<void> {
       );
       try {
         const fallbackReply = await generate({
-          system,
+          system: systemWithFacts,
           history,
           message: normalisedMessage,
           model: fallbackModel,
