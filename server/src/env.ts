@@ -4,6 +4,27 @@ import { z } from 'zod';
 // Load .env locally if present
 config();
 
+function normalizeOptionalUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.replace(/\/+$/, '');
+}
+
+function isAbsoluteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return Boolean(parsed.protocol && parsed.host);
+  } catch {
+    return false;
+  }
+}
+
+const optionalUrlSchema = z.preprocess(
+  normalizeOptionalUrl,
+  z.string().refine(isAbsoluteUrl, 'Must be a valid absolute URL').optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
@@ -117,11 +138,8 @@ const envSchema = z.object({
     .string()
     .transform((val) => val === 'true')
     .default('false'),
-  PUBLIC_API_URL: z.preprocess((val) => {
-    if (typeof val !== 'string') return undefined;
-    const trimmed = val.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }, z.string().optional()),
+  PUBLIC_API_URL: optionalUrlSchema,
+  APP_RETURN_URL: optionalUrlSchema,
 
   // Email
   SMTP_HOST: z.string().default('localhost'),

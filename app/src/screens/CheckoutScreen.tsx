@@ -16,7 +16,7 @@ import {
   ShowtimeItem,
 } from '../schemas/cinema';
 import { cinemaClient } from '../api/cinemaClient';
-import { openPaymentBrowser } from '../utils/browser';
+import { openPaymentCheckoutSession } from '../utils/browser';
 import { generateIdempotencyKey } from '../utils/crypto';
 import { formatKoboToNaira } from '../utils/money';
 import { getDisplayMessage } from '../utils/error';
@@ -171,7 +171,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       setCheckoutState('awaiting_payment');
 
       // Open Flutterwave hosted link
-      await openPaymentBrowser(res.paymentLink);
+      await openPaymentCheckoutSession(res.paymentLink);
 
       // Once user returns to app, begin polling for ticket confirmation
       pollForConfirmation();

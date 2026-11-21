@@ -4,6 +4,7 @@
     "slug": "avue",
     "description": "A cinema ticket booking app. A view. Your view. Our view.",
     "version": "1.0.0",
+    "scheme": "avue",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/logo/a-vue-icon-1024.png",

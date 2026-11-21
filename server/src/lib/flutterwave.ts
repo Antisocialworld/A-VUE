@@ -169,8 +169,10 @@ export async function createFlutterwavePaymentLink(
   }
 
   const amountNaira = (params.amountKobo / 100).toFixed(2);
-  const redirectUrl =
-    params.redirectUrl || `http://${env.HOST}:${env.PORT}/payments/callback?tx_ref=${params.txRef}`;
+  const defaultRedirectUrl = env.PUBLIC_API_URL
+    ? `${env.PUBLIC_API_URL}/payments/callback?tx_ref=${encodeURIComponent(params.txRef)}`
+    : `http://${env.HOST}:${env.PORT}/payments/callback?tx_ref=${params.txRef}`;
+  const redirectUrl = params.redirectUrl || defaultRedirectUrl;
 
   const requestBody = {
     tx_ref: params.txRef,

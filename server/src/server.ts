@@ -7,10 +7,12 @@ import { authRoutes } from './routes/auth.js';
 import { movieRoutes } from './routes/movies.js';
 import { showtimeRoutes } from './routes/showtimes.js';
 import { checkoutRoutes } from './routes/checkout.js';
+import { paymentCallbackRoutes } from './routes/paymentCallback.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { cronRoutes } from './routes/cron.js';
 import { assistantRoutes } from './routes/assistant.js';
+import { warnIfPublicApiUrlMissing } from './lib/flutterwave.js';
 
 export function serializeRequest(req: { id?: string; method?: string; url?: string }): {
   id?: string;
@@ -28,6 +30,8 @@ export function serializeRequest(req: { id?: string; method?: string; url?: stri
 }
 
 export async function buildServer(): Promise<FastifyInstance> {
+  warnIfPublicApiUrlMissing();
+
   const fastify = Fastify({
     logger: {
       level: env.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -131,6 +135,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(movieRoutes);
   await fastify.register(showtimeRoutes);
   await fastify.register(checkoutRoutes);
+  await fastify.register(paymentCallbackRoutes);
   await fastify.register(webhookRoutes);
   await fastify.register(ticketRoutes);
   await fastify.register(cronRoutes);
