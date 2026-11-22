@@ -5,7 +5,7 @@
  * or migrated to Railway Hobby if cold-starts or streaming limits fail.
  */
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { buildServer } from '../src/server.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -19,7 +19,7 @@ async function getApp(): Promise<FastifyInstance> {
   return appInstance;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   const app = await getApp();
   app.server.emit('request', req, res);
 }
