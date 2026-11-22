@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from './env.js';
 import { healthRoutes } from './routes/health.js';
@@ -13,6 +14,8 @@ import { ticketRoutes } from './routes/tickets.js';
 import { cronRoutes } from './routes/cron.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { warnIfPublicApiUrlMissing } from './lib/flutterwave.js';
+
+let cachedApp: FastifyInstance | null = null;
 
 export function serializeRequest(req: { id?: string; method?: string; url?: string }): {
   id?: string;
@@ -142,5 +145,13 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(assistantRoutes);
 
   return fastify;
+}
+
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  if (!cachedApp) {
+    cachedApp = await buildServer();
+    await cachedApp.ready();
+  }
+  cachedApp.server.emit('request', req, res);
 }
 
